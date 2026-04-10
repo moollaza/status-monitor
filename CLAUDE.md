@@ -52,6 +52,16 @@ This project uses the compound engineering skill suite:
 - Run `/cleanup` before committing; lint and test before every commit
 - Keep commits short and factual
 
+## Issue Tracking (Linear — required)
+
+All work is tracked in Linear. **The Linear MCP must be connected before planning or implementation work begins.**
+
+- **Project**: StatusMonitor — https://linear.app/moollaza/project/statusmonitor-ac69e82c3ceb
+- **Team**: Side Projects (`ZPR` prefix)
+- **MCP**: `plugin:linear:linear` — connect via OAuth when starting a session
+
+Every non-trivial task should have a corresponding ZPR issue. Reference issue numbers in commit messages (e.g. `Fix Slack 404 (ZPR-4)`). When planning new features with `/ce:plan`, create or update the relevant Linear issues with milestone, priority, and blocking relationships.
+
 ## Status Page Support
 
 Most catalog services use the Atlassian Statuspage JSON API. A few use RSS/Atom feeds. Services with custom proprietary status pages are out of scope for v1.
