@@ -55,13 +55,17 @@ struct DashboardView: View {
                 Button(action: { manager.pollAll() }) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Refresh all")
 
-                Button(action: { showSettings.toggle() }) {
+                Button(action: { showSettings = true }) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 12))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Settings")
@@ -172,6 +176,7 @@ struct DashboardView: View {
             .padding(.vertical, 8)
         }
         .frame(width: 420, height: 520)
+        .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .environment(manager)
@@ -195,6 +200,7 @@ struct ProviderRowView: View {
     let isExpanded: Bool
     let onTap: () -> Void
     @State private var showAllComponents = false
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -205,7 +211,7 @@ struct ProviderRowView: View {
                     Circle()
                         .fill(Color(nsColor: snapshot.overallStatus.color))
                         .frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
                         .offset(x: 2, y: 2)
                 }
 
@@ -333,6 +339,7 @@ struct ProviderRowView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(isExpanded ? Color(nsColor: .controlBackgroundColor).opacity(0.5) : Color.clear)
+        .background((isExpanded || isHovered) ? Color(nsColor: .controlBackgroundColor).opacity(0.5) : Color.clear)
+        .onHover { hovering in isHovered = hovering }
     }
 }
