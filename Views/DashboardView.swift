@@ -99,7 +99,7 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 1) {
+                    VStack(spacing: 1) {
                         ForEach(sortedSnapshots) { snapshot in
                             let provider = manager.providers.first(where: { $0.id == snapshot.id })
                             ProviderRowView(
@@ -162,6 +162,7 @@ struct ProviderRowView: View {
     var statusPageURL: URL? = nil
     let isExpanded: Bool
     let onTap: () -> Void
+    @State private var showAllComponents = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -204,20 +205,42 @@ struct ProviderRowView: View {
             // Expanded detail
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    // Components
+                    // Components — show non-operational by default
                     if !snapshot.components.isEmpty {
-                        ForEach(snapshot.components) { comp in
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(Color(nsColor: comp.status.color))
-                                    .frame(width: 6, height: 6)
-                                Text(comp.name)
-                                    .font(.caption)
-                                Spacer()
-                                Text(comp.status.label)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                        let degraded = snapshot.components.filter { $0.status != .operational }
+                        let componentsToShow = showAllComponents ? snapshot.components : degraded
+
+                        if !componentsToShow.isEmpty {
+                            ForEach(componentsToShow) { comp in
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(Color(nsColor: comp.status.color))
+                                        .frame(width: 6, height: 6)
+                                    Text(comp.name)
+                                        .font(.caption)
+                                    Spacer()
+                                    Text(comp.status.label)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+                        } else if !showAllComponents {
+                            Text("All \(snapshot.components.count) components operational")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if snapshot.components.count > degraded.count {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    showAllComponents.toggle()
+                                }
+                            } label: {
+                                Text(showAllComponents ? "Show issues only" : "Show all \(snapshot.components.count) components")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
 
