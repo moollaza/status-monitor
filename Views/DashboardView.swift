@@ -101,9 +101,11 @@ struct DashboardView: View {
                 ScrollView {
                     LazyVStack(spacing: 1) {
                         ForEach(sortedSnapshots) { snapshot in
+                            let provider = manager.providers.first(where: { $0.id == snapshot.id })
                             ProviderRowView(
                                 snapshot: snapshot,
-                                statusPageURL: manager.providers.first(where: { $0.id == snapshot.id }).flatMap { URL(string: $0.baseURL) },
+                                catalogId: provider?.catalogEntryId,
+                                statusPageURL: provider.flatMap { URL(string: $0.baseURL) },
                                 isExpanded: expandedProvider == snapshot.id,
                                 onTap: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -156,6 +158,7 @@ struct DashboardView: View {
 
 struct ProviderRowView: View {
     let snapshot: ProviderSnapshot
+    var catalogId: String? = nil
     var statusPageURL: URL? = nil
     let isExpanded: Bool
     let onTap: () -> Void
@@ -164,9 +167,14 @@ struct ProviderRowView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Main row
             HStack(spacing: 10) {
-                Circle()
-                    .fill(Color(nsColor: snapshot.overallStatus.color))
-                    .frame(width: 10, height: 10)
+                ZStack(alignment: .bottomTrailing) {
+                    ServiceIconView(name: snapshot.name, catalogId: catalogId)
+                    Circle()
+                        .fill(Color(nsColor: snapshot.overallStatus.color))
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                        .offset(x: 2, y: 2)
+                }
 
                 Text(snapshot.name)
                     .font(.system(.body, weight: .medium))
