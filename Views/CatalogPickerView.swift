@@ -32,21 +32,43 @@ struct CatalogPickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Browse Services")
-                    .font(.headline)
-                Spacer()
-                Button(isOnboarding ? "Skip" : "Done") {
-                    onDismiss()
+            if isOnboarding {
+                // Welcome header for first launch
+                VStack(spacing: 4) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 28))
+                        .foregroundColor(.accentColor)
+                        .padding(.bottom, 2)
+                    Text("Status Monitor")
+                        .font(.headline)
+                    Text("Monitor your services. Know before your users do.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Pick the services you use — we'll watch them for you.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
 
-            Divider()
+                Divider()
+            } else {
+                // Standard header for Settings access
+                HStack {
+                    Text("Browse Services")
+                        .font(.headline)
+                    Spacer()
+                    Button("Done") {
+                        onDismiss()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                Divider()
+            }
 
             // Search
             HStack {

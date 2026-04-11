@@ -34,8 +34,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateMenuBarIcon(for: .operational)
 
         if let button = statusItem.button {
-            button.action = #selector(togglePopover)
+            button.action = #selector(handleStatusBarClick)
             button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = "Status Monitor — All operational"
         }
 
         // Set up popover
@@ -62,9 +64,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Observe overall status changes for menu bar icon
+        // Observe overall status changes for menu bar icon + tooltip
         statusManager.onWorstStatusChanged = { [weak self] status in
             self?.updateMenuBarIcon(for: status)
+            self?.updateTooltip()
         }
 
         // Auto-open popover on first launch for onboarding
@@ -74,6 +77,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+    }
+
+    // MARK: - Menu Bar Icon
 
     func updateMenuBarIcon(for status: ComponentStatus) {
         guard let button = statusItem?.button else { return }
@@ -85,6 +97,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.contentTintColor = color
     }
 
+    private func updateTooltip() {
+        let degradedCount = statusManager.snapshots
+            .filter { $0.error == nil && $0.overallStatus != .operational }
+            .count
+        if degradedCount == 0 {
+            statusItem.button?.toolTip = "Status Monitor — All operational"
+        } else {
+            let s = degradedCount == 1 ? "service" : "services"
+            statusItem.button?.toolTip = "Status Monitor — \(degradedCount) \(s) degraded"
+        }
+    }
+
+    // MARK: - Click Handling
+
+    @objc func handleStatusBarClick() {
+        guard let event = NSApp.currentEvent else {
+            togglePopover()
+            return
+        }
+        if event.type == .rightMouseUp {
+            showContextMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
     @objc func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
@@ -93,5 +131,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    // MARK: - Right-Click Context Menu
+
+    private func showContextMenu() {
+        let menu = NSMenu()
+
+        menu.addItem(withTitle: "About StatusMonitor", action: #selector(showAbout), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+        menu.addItem(withTitle: "Send Feedback…", action: #selector(sendFeedback), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit StatusMonitor", action: #selector(quitApp), keyEquivalent: "q")
+
+        for item in menu.items {
+            item.target = self
+        }
+
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        // Remove menu after showing so left-click goes back to popover
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItem.menu = nil
+        }
+    }
+
+    @objc private func showAbout() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Status Monitor",
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0",
+            .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1",
+            .credits: NSAttributedString(
+                string: "Made by MoollApps\nhttps://github.com/moollaza/status-monitor",
+                attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+            ),
+        ])
+        // Return to accessory mode after about panel closes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
+    @objc private func openPreferences() {
+        // Open the Settings window via the SwiftUI scene
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
+    @objc private func sendFeedback() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        let body = "**App Version:** \(version)\n**macOS:** \(osVersion)\n\n**Describe the issue or suggestion:**\n\n"
+        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "https://github.com/moollaza/status-monitor/issues/new?title=Feedback&body=\(encodedBody)"
+        if let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
     }
 }

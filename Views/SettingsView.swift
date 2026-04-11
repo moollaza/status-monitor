@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Environment(StatusManager.self) var manager
     @State private var showAddProvider = false
     @State private var showCatalogPicker = false
+    @State private var providerToRemove: Provider?
     @State private var newName = ""
     @State private var newURL = ""
     @State private var newType: ProviderType = .statuspage
@@ -85,7 +86,7 @@ struct SettingsView: View {
 
                             // Remove button
                             Button {
-                                manager.removeProvider(provider)
+                                providerToRemove = provider
                             } label: {
                                 Image(systemName: "minus.circle.fill")
                                     .foregroundStyle(.secondary)
@@ -123,6 +124,20 @@ struct SettingsView: View {
             }
             .environment(manager)
             .frame(width: 400, height: 480)
+        }
+        .alert("Remove Service", isPresented: Binding(
+            get: { providerToRemove != nil },
+            set: { if !$0 { providerToRemove = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { providerToRemove = nil }
+            Button("Remove", role: .destructive) {
+                if let provider = providerToRemove {
+                    manager.removeProvider(provider)
+                    providerToRemove = nil
+                }
+            }
+        } message: {
+            Text("Remove \(providerToRemove?.name ?? "this service")? You can add it back from the catalog.")
         }
     }
 

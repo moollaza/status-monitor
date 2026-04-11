@@ -9,20 +9,26 @@ struct DashboardView: View {
     @State private var expandedProvider: UUID?
     @State private var showSettings = false
     @State private var showCatalogPicker = false
+    @State private var searchText = ""
     @AppStorage("dashboardSort") private var sortOrder: DashboardSort = .severity
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
+    private var filteredSnapshots: [ProviderSnapshot] {
+        guard !searchText.isEmpty else { return manager.snapshots }
+        return manager.snapshots.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
 
     private var sortedSnapshots: [ProviderSnapshot] {
         switch sortOrder {
         case .severity:
-            return manager.snapshots.sorted {
+            return filteredSnapshots.sorted {
                 if $0.overallStatus != $1.overallStatus {
                     return $0.overallStatus > $1.overallStatus
                 }
                 return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
         case .alphabetical:
-            return manager.snapshots.sorted {
+            return filteredSnapshots.sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
         }
@@ -62,6 +68,32 @@ struct DashboardView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+
+            // Search bar (shown when 5+ services)
+            if manager.providers.count >= 5 {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    TextField("Filter services...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                    if !searchText.isEmpty {
+                        Button(action: { searchText = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(6)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
 
             Divider()
 
