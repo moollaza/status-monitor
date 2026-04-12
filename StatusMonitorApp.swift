@@ -1,5 +1,8 @@
 import SwiftUI
 import UserNotifications
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "ui")
 
 @main
 struct StatusMonitorApp: App {
@@ -18,16 +21,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover!
     let statusManager = StatusManager()
     private var eventMonitor: Any?
-    private var feedbackWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        logger.info("App launching")
+
         // Hide dock icon — menu bar only
         NSApp.setActivationPolicy(.accessory)
 
         // Ensure notification delegate is set before anything else
         UNUserNotificationCenter.current().delegate = NotificationService.shared
-
-        // Request notification permissions
         NotificationService.shared.requestPermission()
 
         // Set up menu bar item
@@ -41,7 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "Status Monitor — All operational"
         }
 
-        // Set up popover
+        // Set up popover (no arrow)
         popover = NSPopover()
         popover.contentSize = NSSize(width: 420, height: 520)
         popover.behavior = .transient
@@ -73,10 +75,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Auto-open popover on first launch for onboarding
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+            logger.info("First launch detected — opening popover for onboarding")
             DispatchQueue.main.async { [weak self] in
                 self?.togglePopover()
             }
         }
+
+        #if DEBUG
+        // Dev mode: listen for simulated status changes
+        NotificationCenter.default.addObserver(forName: .init("SimulateStatus"), object: nil, queue: .main) { [weak self] notification in
+            guard let id = notification.userInfo?["id"] as? UUID,
+                  let status = notification.userInfo?["status"] as? ComponentStatus,
+                  let self = self else { return }
+            if let idx = self.statusManager.snapshots.firstIndex(where: { $0.id == id }) {
+                self.statusManager.snapshots[idx] = ProviderSnapshot(
+                    id: id,
+                    name: self.statusManager.snapshots[idx].name,
+                    overallStatus: status,
+                    components: self.statusManager.snapshots[idx].components,
+                    activeIncidents: self.statusManager.snapshots[idx].activeIncidents,
+                    lastUpdated: Date(),
+                    error: nil
+                )
+                self.statusManager.recalcWorstStatus()
+                logger.debug("Simulated status change for \(self.statusManager.snapshots[idx].name): \(status.label)")
+            }
+        }
+        #endif
+
+        logger.info("App launch complete — \(self.statusManager.providers.count) providers loaded")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -84,6 +111,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
+        logger.info("App terminating")
     }
 
     // MARK: - Menu Bar Icon
@@ -142,7 +170,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "About StatusMonitor", action: #selector(showAbout), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
-        menu.addItem(withTitle: "Send Feedback…", action: #selector(sendFeedback), keyEquivalent: "")
+        menu.addItem(withTitle: "Send Feedback…", action: #selector(openFeedback), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit StatusMonitor", action: #selector(quitApp), keyEquivalent: "q")
 
@@ -152,7 +180,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
-        // Remove menu after showing so left-click goes back to popover
         DispatchQueue.main.async { [weak self] in
             self?.statusItem.menu = nil
         }
@@ -169,33 +196,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
             ),
         ])
-        // Return to accessory mode after about panel closes
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             NSApp.setActivationPolicy(.accessory)
         }
     }
 
     @objc private func openPreferences() {
-        // Open the Settings window via the SwiftUI scene
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func sendFeedback() {
-        // Close existing feedback window if open
-        feedbackWindow?.close()
-        feedbackWindow = nil
-
-        let feedbackView = FeedbackView()
-        let controller = NSHostingController(rootView: feedbackView)
-        let window = NSWindow(contentViewController: controller)
-        window.title = "Send Feedback"
-        window.styleMask = [.titled, .closable]
-        window.isReleasedWhenClosed = false
-        window.setContentSize(controller.sizeThatFits(in: NSSize(width: 420, height: 600)))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
+    @objc private func openFeedback() {
+        // Open Settings window and navigate to Feedback tab
+        // For now, just open Settings — the user can click Feedback in the sidebar
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
-        feedbackWindow = window
     }
 
     @objc private func quitApp() {

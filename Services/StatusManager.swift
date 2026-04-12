@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "polling")
 
 @MainActor
 @Observable
@@ -178,6 +181,7 @@ class StatusManager {
                 try parseRSS(data: data, provider: provider)
             }
         } catch {
+            logger.error("Poll failed for \(provider.name): \(error.localizedDescription)")
             updateSnapshot(for: provider, error: "Unable to read status page")
         }
     }

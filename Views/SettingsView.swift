@@ -1,5 +1,8 @@
 import SwiftUI
 import ServiceManagement
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "ui")
 
 private let pollIntervalOptions: [(label: String, seconds: Int)] = [
     ("30s", 30),
@@ -9,52 +12,125 @@ private let pollIntervalOptions: [(label: String, seconds: Int)] = [
     ("15m", 900),
 ]
 
+// MARK: - Main Settings View (Sidebar Navigation)
+
+enum SettingsTab: String, CaseIterable {
+    case services = "Services"
+    case catalog = "Catalog"
+    case preferences = "Preferences"
+    case feedback = "Feedback"
+    case help = "Help"
+
+    var icon: String {
+        switch self {
+        case .services: return "list.bullet"
+        case .catalog: return "square.grid.2x2"
+        case .preferences: return "gearshape"
+        case .feedback: return "bubble.left"
+        case .help: return "questionmark.circle"
+        }
+    }
+}
+
 struct SettingsView: View {
     @Environment(StatusManager.self) var manager
-    @State private var showAddProvider = false
-    @State private var showCatalogPicker = false
+    @State private var selectedTab: SettingsTab = .services
+
+    var body: some View {
+        NavigationSplitView {
+            List(SettingsTab.allCases, id: \.self, selection: $selectedTab) { tab in
+                Label(tab.rawValue, systemImage: tab.icon)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 180)
+        } detail: {
+            Group {
+                switch selectedTab {
+                case .services:
+                    ServicesSettingsView()
+                        .environment(manager)
+                case .catalog:
+                    CatalogSettingsView()
+                        .environment(manager)
+                case .preferences:
+                    PreferencesSettingsView()
+                case .feedback:
+                    FeedbackView()
+                case .help:
+                    HelpSettingsView()
+                }
+            }
+            .frame(minWidth: 450, minHeight: 400)
+        }
+        .frame(width: 680, height: 480)
+    }
+}
+
+// MARK: - Services Tab
+
+struct ServicesSettingsView: View {
+    @Environment(StatusManager.self) var manager
     @State private var providerToRemove: Provider?
-    @State private var newName = ""
-    @State private var newURL = ""
-    @State private var newType: ProviderType = .statuspage
-    @Environment(\.dismiss) var dismiss
+    @State private var showAddCustom = false
+
+    var sortedProviders: [Provider] {
+        manager.providers.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header
             HStack {
-                Text("Services")
+                Text("Monitored Services")
                     .font(.headline)
+                Text("(\(manager.providers.count))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Button("Browse Catalog") { showCatalogPicker = true }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                Button("Add Custom") { showAddProvider.toggle() }
-                    .buttonStyle(.bordered)
+                Button("Add Custom...") { showAddCustom = true }
                     .controlSize(.small)
             }
             .padding()
-
-            Divider()
 
             if manager.providers.isEmpty {
                 VStack(spacing: 8) {
                     Text("No services added")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text("Use Browse Catalog to get started.")
+                    Text("Go to the Catalog tab to add services.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Table header
+                HStack(spacing: 0) {
+                    Text("Service")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Interval")
+                        .frame(width: 70, alignment: .center)
+                    Text("Muted")
+                        .frame(width: 50, alignment: .center)
+                    Text("")
+                        .frame(width: 30)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+
+                Divider()
+
                 List {
-                    ForEach(manager.providers) { provider in
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
+                    ForEach(sortedProviders) { provider in
+                        HStack(spacing: 8) {
+                            ServiceIconView(name: provider.name, catalogId: provider.catalogEntryId)
+
+                            VStack(alignment: .leading, spacing: 1) {
                                 Text(provider.name)
                                     .font(.system(.body, weight: .medium))
                                 Text(provider.baseURL)
-                                    .font(.caption)
+                                    .font(.caption2)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -62,87 +138,54 @@ struct SettingsView: View {
 
                             Spacer()
 
-                            // Poll interval — compact
+                            // Poll interval
                             Menu {
                                 ForEach(pollIntervalOptions, id: \.seconds) { option in
-                                    Button {
+                                    Button(option.label) {
                                         manager.updatePollInterval(for: provider, seconds: option.seconds)
-                                    } label: {
-                                        HStack {
-                                            Text(option.label)
-                                            if provider.pollIntervalSeconds == option.seconds {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
                                     }
                                 }
                             } label: {
                                 Text(intervalLabel(for: provider.pollIntervalSeconds))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .frame(width: 35)
                             }
                             .menuStyle(.borderlessButton)
                             .fixedSize()
-                            .help("Poll interval")
 
                             // Mute toggle
                             Button {
                                 manager.toggleMute(for: provider)
                             } label: {
-                                Image(systemName: provider.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                Image(systemName: provider.isMuted ? "speaker.slash.fill" : "speaker.wave.2")
                                     .foregroundStyle(provider.isMuted ? .orange : .secondary)
-                                    .font(.system(size: 14))
+                                    .font(.system(size: 12))
                             }
                             .buttonStyle(.plain)
-                            .help(provider.isMuted ? "Unmute service" : "Mute service")
+                            .help(provider.isMuted ? "Unmute" : "Mute")
+                            .frame(width: 24)
 
-                            // Remove button
+                            // Remove
                             Button {
                                 providerToRemove = provider
                             } label: {
-                                Image(systemName: "minus.circle.fill")
+                                Image(systemName: "trash")
                                     .foregroundStyle(.secondary)
-                                    .font(.system(size: 14))
+                                    .font(.system(size: 11))
                             }
                             .buttonStyle(.plain)
                             .help("Remove service")
+                            .frame(width: 24)
                         }
-                        .padding(.vertical, 2)
                     }
                 }
-                .listStyle(.inset)
+                .listStyle(.inset(alternatesRowBackgrounds: true))
             }
-
-            Divider()
-
-            HStack {
-                Text("\(manager.providers.count) services")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Toggle("Launch at Login", isOn: Binding(
-                    get: { SMAppService.mainApp.status == .enabled },
-                    set: { newValue in toggleLaunchAtLogin(newValue) }
-                ))
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-            }
-            .padding()
         }
-        .frame(width: 440, height: 400)
-        .sheet(isPresented: $showAddProvider) {
-            addProviderSheet
-        }
-        .sheet(isPresented: $showCatalogPicker) {
-            CatalogPickerView(isOnboarding: false) {
-                showCatalogPicker = false
-            }
-            .environment(manager)
-            .frame(width: 400, height: 480)
+        .sheet(isPresented: $showAddCustom) {
+            AddCustomServiceView()
+                .environment(manager)
         }
         .alert("Remove Service", isPresented: Binding(
             get: { providerToRemove != nil },
@@ -163,64 +206,253 @@ struct SettingsView: View {
     private func intervalLabel(for seconds: Int) -> String {
         pollIntervalOptions.first(where: { $0.seconds == seconds })?.label ?? "\(seconds)s"
     }
+}
 
-    private var addProviderSheet: some View {
+// MARK: - Add Custom Service (sheet within Settings)
+
+struct AddCustomServiceView: View {
+    @Environment(StatusManager.self) var manager
+    @Environment(\.dismiss) var dismiss
+    @State private var name = ""
+    @State private var url = ""
+    @State private var type: ProviderType = .statuspage
+
+    var body: some View {
         VStack(spacing: 16) {
             Text("Add Custom Service")
                 .font(.headline)
 
-            TextField("Name (e.g. Anthropic)", text: $newName)
+            TextField("Name (e.g. My Service)", text: $name)
                 .textFieldStyle(.roundedBorder)
 
-            TextField("URL (e.g. https://status.anthropic.com)", text: $newURL)
+            TextField("Status Page URL (e.g. https://status.example.com)", text: $url)
                 .textFieldStyle(.roundedBorder)
 
-            Picker("Type", selection: $newType) {
-                ForEach(ProviderType.allCases, id: \.self) { type in
-                    Text(type.rawValue).tag(type)
+            Picker("Type", selection: $type) {
+                ForEach(ProviderType.allCases, id: \.self) { t in
+                    Text(t.rawValue).tag(t)
                 }
             }
             .pickerStyle(.segmented)
 
-            Text("For Atlassian Statuspage sites, use the base URL. The app appends /api/v2/summary.json automatically. For RSS, provide the full feed URL.")
+            Text("For Atlassian Statuspage sites, use the base URL. For RSS, provide the full feed URL.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button("Cancel") {
-                    resetAddForm()
-                    showAddProvider = false
-                }
+                Button("Cancel") { dismiss() }
                 Spacer()
                 Button("Add") {
-                    let provider = Provider(name: newName, baseURL: newURL, type: newType)
+                    let provider = Provider(name: name, baseURL: url, type: type)
                     manager.addProvider(provider)
-                    resetAddForm()
-                    showAddProvider = false
+                    logger.info("Added custom provider: \(name)")
+                    dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(newName.isEmpty || newURL.isEmpty)
+                .disabled(name.isEmpty || url.isEmpty)
             }
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 400)
+    }
+}
+
+// MARK: - Catalog Tab
+
+struct CatalogSettingsView: View {
+    @Environment(StatusManager.self) var manager
+    @State private var searchText = ""
+    @State private var expandedCategories: Set<String> = Set(Catalog.shared.categories)
+
+    private var catalog: Catalog { Catalog.shared }
+
+    private var monitoredIds: Set<String> {
+        Set(manager.providers.compactMap(\.catalogEntryId))
     }
 
-    private func resetAddForm() {
-        newName = ""
-        newURL = ""
-        newType = .statuspage
-    }
-
-    private func toggleLaunchAtLogin(_ enable: Bool) {
-        do {
-            if enable {
-                try SMAppService.mainApp.register()
+    private var filteredEntries: [(String, [CatalogEntry])] {
+        catalog.categories.compactMap { category in
+            let entries: [CatalogEntry]
+            if searchText.isEmpty {
+                entries = catalog.entries(in: category)
             } else {
-                try SMAppService.mainApp.unregister()
+                entries = catalog.search(searchText).filter { $0.category == category }
             }
-        } catch {
-            print("Launch at login failed: \(error.localizedDescription)")
+            return entries.isEmpty ? nil : (category, entries)
         }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Service Catalog")
+                    .font(.headline)
+                Text("(\(catalog.entries.count) available)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(monitoredIds.count) added")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+
+            // Search
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                TextField("Search services...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                if !searchText.isEmpty {
+                    Button(action: { searchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
+            Divider()
+
+            // Category list
+            List {
+                ForEach(filteredEntries, id: \.0) { category, entries in
+                    DisclosureGroup(
+                        isExpanded: Binding(
+                            get: { expandedCategories.contains(category) },
+                            set: { if $0 { expandedCategories.insert(category) } else { expandedCategories.remove(category) } }
+                        )
+                    ) {
+                        ForEach(entries) { entry in
+                            let isMonitored = monitoredIds.contains(entry.id)
+                            HStack {
+                                Toggle(isOn: Binding(
+                                    get: { isMonitored },
+                                    set: { newValue in
+                                        if newValue {
+                                            manager.addProvider(Provider(from: entry))
+                                            logger.info("Added from catalog: \(entry.name)")
+                                        } else {
+                                            if let provider = manager.providers.first(where: { $0.catalogEntryId == entry.id }) {
+                                                manager.removeProvider(provider)
+                                                logger.info("Removed from catalog: \(entry.name)")
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text(entry.name)
+                                        .font(.body)
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(category)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("(\(entries.count))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .listStyle(.inset)
+        }
+    }
+}
+
+// MARK: - Preferences Tab
+
+struct PreferencesSettingsView: View {
+    var body: some View {
+        Form {
+            Section("General") {
+                Toggle("Launch at Login", isOn: Binding(
+                    get: { SMAppService.mainApp.status == .enabled },
+                    set: { newValue in
+                        do {
+                            if newValue {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            logger.error("Launch at login failed: \(error.localizedDescription)")
+                        }
+                    }
+                ))
+            }
+
+            Section("Notifications") {
+                Text("Notifications are sent when a service status changes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+}
+
+// MARK: - Help Tab
+
+struct HelpSettingsView: View {
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // App info
+            HStack(spacing: 12) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 32))
+                    .foregroundColor(.accentColor)
+                VStack(alignment: .leading) {
+                    Text("Status Monitor")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("Version \(appVersion)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Made by MoollApps")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            Text("How It Works")
+                .font(.headline)
+            Text("Status Monitor polls public status pages (Atlassian Statuspage and RSS feeds) on a configurable interval and shows you the current status of your services. When a status changes, you get a notification.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Link("GitHub Repository", destination: URL(string: "https://github.com/moollaza/status-monitor")!)
+                Link("Report a Bug", destination: URL(string: "https://github.com/moollaza/status-monitor/issues/new?template=bug_report.yml")!)
+                Link("Request a Feature", destination: URL(string: "https://github.com/moollaza/status-monitor/issues/new?template=feature_request.yml")!)
+            }
+            .font(.body)
+
+            Spacer()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

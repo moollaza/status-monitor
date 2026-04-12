@@ -49,7 +49,7 @@
   {"id": "webflow", "name": "Webflow", "base_url": "https://status.webflow.com", "type": "statuspage", "category": "Productivity"},
   {"id": "canvas", "name": "Canvas (LMS)", "base_url": "https://www.canvastatus.com", "type": "statuspage", "category": "Productivity"},
   {"id": "dropbox", "name": "Dropbox", "base_url": "https://status.dropbox.com", "type": "statuspage", "category": "Productivity"},
-  {"id": "zoom", "name": "Zoom", "base_url": "https://status.zoom.us", "type": "statuspage", "category": "Productivity"},
+  {"id": "zoom", "name": "Zoom", "base_url": "https://www.zoomstatus.com", "type": "statuspage", "category": "Productivity"},
 
   {"id": "twilio", "name": "Twilio", "base_url": "https://status.twilio.com", "type": "statuspage", "category": "Communication"},
   {"id": "sendgrid", "name": "SendGrid", "base_url": "https://status.sendgrid.com", "type": "statuspage", "category": "Communication"},
