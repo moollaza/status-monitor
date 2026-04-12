@@ -16,13 +16,55 @@ struct StatusMonitorApp: App {
     }
 }
 
+// MARK: - Floating Panel (replaces NSPopover for clean rectangle, no arrow)
+
+class FloatingPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+
+    init(contentRect: NSRect) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: [.nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        isFloatingPanel = true
+        level = .popUpMenu
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        isReleasedWhenClosed = false
+        hidesOnDeactivate = false
+
+        // Visual effect for native macOS panel look
+        let visualEffect = NSVisualEffectView(frame: contentRect)
+        visualEffect.material = .popover
+        visualEffect.state = .active
+        visualEffect.wantsLayer = true
+        visualEffect.layer?.cornerRadius = 10
+        visualEffect.layer?.masksToBounds = true
+        contentView = visualEffect
+    }
+
+    // Close on Escape key
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { // Escape
+            close()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
-    var popover: NSPopover!
+    var panel: FloatingPanel!
     let statusManager = StatusManager()
     private var eventMonitor: Any?
     private var localEventMonitor: Any?
     private var settingsWindow: NSWindow?
+
+    var isPanelShown: Bool { panel?.isVisible ?? false }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("App launching")
@@ -44,26 +86,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "Status Monitor — All operational"
         }
 
-        // Popover
-        popover = NSPopover()
-        popover.contentSize = NSSize(width: 420, height: 520)
-        popover.behavior = .transient
-        popover.hasFullSizeContent = true
-        popover.contentViewController = NSHostingController(
+        // Floating panel (clean rectangle, no popover arrow)
+        let panelSize = NSSize(width: 420, height: 520)
+        panel = FloatingPanel(contentRect: NSRect(origin: .zero, size: panelSize))
+
+        let hostingView = NSHostingView(
             rootView: DashboardView(onOpenSettings: { [weak self] in
                 self?.openSettings()
             })
             .environment(statusManager)
         )
+        hostingView.frame = NSRect(origin: .zero, size: panelSize)
 
-        // Close popover on outside click
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.popover.performClose(nil)
+        // Add hosting view as subview of the visual effect view
+        if let visualEffect = panel.contentView as? NSVisualEffectView {
+            hostingView.autoresizingMask = [.width, .height]
+            visualEffect.addSubview(hostingView)
         }
 
-        // Keyboard shortcut: Cmd+R to refresh (only when popover is shown)
+        // Close panel on outside click
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            if self?.isPanelShown == true {
+                self?.panel.close()
+            }
+        }
+
+        // Keyboard shortcut: Cmd+R to refresh (only when panel is shown)
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.popover.isShown else { return event }
+            guard let self, self.isPanelShown else { return event }
             if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "r" {
                 self.statusManager.pollAll()
                 return nil
@@ -74,10 +124,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start polling
         statusManager.startPolling()
 
-        // Notification tap → open popover
+        // Notification tap → open panel
         NotificationService.shared.onNotificationTapped = { [weak self] in
-            if !(self?.popover.isShown ?? false) {
-                self?.togglePopover()
+            if self?.isPanelShown != true {
+                self?.togglePanel()
             }
         }
 
@@ -92,11 +142,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateTooltip()
         }
 
-        // First launch → auto-open popover
+        // First launch → auto-open panel
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-            logger.info("First launch — opening popover")
+            logger.info("First launch — opening panel")
             DispatchQueue.main.async { [weak self] in
-                self?.togglePopover()
+                self?.togglePanel()
             }
         }
 
@@ -186,28 +236,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Click Handling
+    // MARK: - Panel Positioning & Toggle
 
     @objc func handleStatusBarClick() {
         guard let event = NSApp.currentEvent else {
-            togglePopover()
+            togglePanel()
             return
         }
         if event.type == .rightMouseUp {
             showContextMenu()
         } else {
-            togglePopover()
+            togglePanel()
         }
     }
 
-    @objc func togglePopover() {
-        guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
+    @objc func togglePanel() {
+        if isPanelShown {
+            panel.close()
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            positionPanel()
+            panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func positionPanel() {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else { return }
+
+        let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let panelSize = panel.frame.size
+        let screenFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+
+        // Center panel horizontally below the menu bar icon
+        var x = buttonFrame.midX - panelSize.width / 2
+        let y = buttonFrame.minY - panelSize.height - 4 // 4pt gap below menu bar
+
+        // Clamp to screen edges with 8pt margin
+        x = max(screenFrame.minX + 8, min(x, screenFrame.maxX - panelSize.width - 8))
+
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     // MARK: - Right-Click Menu
