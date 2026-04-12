@@ -53,8 +53,13 @@ struct Provider: Identifiable, Codable, Equatable {
     var pollIntervalSeconds: Int
     var isEnabled: Bool
     var catalogEntryId: String?  // matches CatalogEntry.id if created from catalog
+    var isMuted: Bool
 
-    init(name: String, baseURL: String, type: ProviderType = .statuspage, pollIntervalSeconds: Int = 60, isEnabled: Bool = true, catalogEntryId: String? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case id, name, baseURL, type, pollIntervalSeconds, isEnabled, catalogEntryId, isMuted
+    }
+
+    init(name: String, baseURL: String, type: ProviderType = .statuspage, pollIntervalSeconds: Int = 60, isEnabled: Bool = true, catalogEntryId: String? = nil, isMuted: Bool = false) {
         self.id = UUID()
         self.name = name
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -62,10 +67,23 @@ struct Provider: Identifiable, Codable, Equatable {
         self.pollIntervalSeconds = max(30, pollIntervalSeconds)
         self.isEnabled = isEnabled
         self.catalogEntryId = catalogEntryId
+        self.isMuted = isMuted
     }
 
     init(from entry: CatalogEntry) {
         self.init(name: entry.name, baseURL: entry.baseURL, type: entry.type, catalogEntryId: entry.id)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        type = try container.decode(ProviderType.self, forKey: .type)
+        pollIntervalSeconds = try container.decode(Int.self, forKey: .pollIntervalSeconds)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        catalogEntryId = try container.decodeIfPresent(String.self, forKey: .catalogEntryId)
+        isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
     }
 
     var hasValidURL: Bool {

@@ -78,6 +78,13 @@ class StatusManager {
         }
     }
 
+    func toggleMute(for provider: Provider) {
+        guard let idx = providers.firstIndex(where: { $0.id == provider.id }) else { return }
+        providers[idx].isMuted.toggle()
+        saveProviders()
+        recalcWorstStatus()
+    }
+
     func removeProvider(_ provider: Provider) {
         timers[provider.id]?.invalidate()
         timers.removeValue(forKey: provider.id)
@@ -264,8 +271,8 @@ class StatusManager {
             snapshots.append(snapshot)
         }
 
-        // Notify on status change (not on first poll)
-        if let prev = previousStatus, prev != snapshot.overallStatus {
+        // Notify on status change (not on first poll, skip if muted)
+        if !provider.isMuted, let prev = previousStatus, prev != snapshot.overallStatus {
             NotificationService.shared.notify(
                 provider: provider.name,
                 from: prev,
@@ -297,8 +304,9 @@ class StatusManager {
     }
 
     private func recalcWorstStatus() {
+        let mutedIds = Set(providers.filter(\.isMuted).map(\.id))
         let newStatus = snapshots
-            .filter { $0.error == nil }
+            .filter { $0.error == nil && !mutedIds.contains($0.id) }
             .map(\.overallStatus)
             .max() ?? .operational
         if newStatus != worstStatus {

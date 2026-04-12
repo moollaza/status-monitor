@@ -182,6 +182,7 @@ struct DashboardView: View {
                                 snapshot: snapshot,
                                 catalogId: provider?.catalogEntryId,
                                 statusPageURL: provider.flatMap { URL(string: $0.baseURL) },
+                                isMuted: provider?.isMuted ?? false,
                                 isExpanded: expandedProvider == snapshot.id,
                                 onTap: {
                                     if snapshot.components.count >= detailViewComponentThreshold {
@@ -193,6 +194,9 @@ struct DashboardView: View {
                                             expandedProvider = expandedProvider == snapshot.id ? nil : snapshot.id
                                         }
                                     }
+                                },
+                                onToggleMute: {
+                                    if let p = provider { manager.toggleMute(for: p) }
                                 }
                             )
                         }
@@ -230,8 +234,10 @@ struct ProviderRowView: View {
     let snapshot: ProviderSnapshot
     var catalogId: String? = nil
     var statusPageURL: URL? = nil
+    var isMuted: Bool = false
     let isExpanded: Bool
     let onTap: () -> Void
+    var onToggleMute: (() -> Void)?
     @State private var showAllComponents = false
     @State private var isHovered = false
 
@@ -250,6 +256,12 @@ struct ProviderRowView: View {
 
                 Text(snapshot.name)
                     .font(.system(.body, weight: .medium))
+
+                if isMuted {
+                    Image(systemName: "speaker.slash.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer()
 
@@ -370,6 +382,17 @@ struct ProviderRowView: View {
                 .padding(.horizontal, 32)
                 .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .opacity(isMuted ? 0.5 : 1.0)
+        .contextMenu {
+            Button {
+                onToggleMute?()
+            } label: {
+                Label(
+                    isMuted ? "Unmute Service" : "Mute Service",
+                    systemImage: isMuted ? "speaker.wave.2.fill" : "speaker.slash.fill"
+                )
             }
         }
         .background((isExpanded || isHovered) ? Color(nsColor: .controlBackgroundColor).opacity(0.5) : Color.clear)

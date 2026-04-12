@@ -84,6 +84,17 @@ struct SettingsView: View {
                             .fixedSize()
                             .help("Poll interval")
 
+                            // Mute toggle
+                            Button {
+                                manager.toggleMute(for: provider)
+                            } label: {
+                                Image(systemName: provider.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                    .foregroundStyle(provider.isMuted ? .orange : .secondary)
+                                    .font(.system(size: 14))
+                            }
+                            .buttonStyle(.plain)
+                            .help(provider.isMuted ? "Unmute service" : "Mute service")
+
                             // Remove button
                             Button {
                                 providerToRemove = provider
