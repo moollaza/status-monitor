@@ -14,7 +14,7 @@ macOS menu bar app that monitors SaaS service status pages and alerts on outages
 - Supports Atlassian Statuspage and RSS/Atom feeds
 - Configurable per-service poll intervals
 - Native macOS app (SwiftUI, no Electron)
-- Free and open source (MIT)
+- Free and source-available ([FSL 1.1](https://fsl.software/), converts to Apache 2.0 in 2028)
 
 ## Install
 
@@ -54,4 +54,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute.
 
 ## License
 
-MIT -- see [LICENSE](LICENSE) for details.
+[Functional Source License 1.1](https://fsl.software/) (FSL-1.1-Apache-2.0) -- see [LICENSE](LICENSE) for details. Converts to Apache 2.0 on 2028-04-12.
