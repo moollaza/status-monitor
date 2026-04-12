@@ -339,24 +339,7 @@ struct CatalogSettingsView: View {
                 if searchText.isEmpty && !popularEntries.isEmpty {
                     Section("Popular") {
                         ForEach(popularEntries) { entry in
-                            let isMonitored = monitoredIds.contains(entry.id)
-                            Toggle(isOn: Binding(
-                                get: { isMonitored },
-                                set: { newValue in
-                                    if newValue {
-                                        manager.addProvider(Provider(from: entry))
-                                        logger.info("Added from popular: \(entry.name)")
-                                    } else {
-                                        if let provider = manager.providers.first(where: { $0.catalogEntryId == entry.id }) {
-                                            manager.removeProvider(provider)
-                                        }
-                                    }
-                                }
-                            )) {
-                                Text(entry.name)
-                                    .font(.body)
-                            }
-                            .toggleStyle(.checkbox)
+                            catalogToggle(for: entry)
                         }
                     }
                 }
@@ -369,27 +352,7 @@ struct CatalogSettingsView: View {
                         )
                     ) {
                         ForEach(entries) { entry in
-                            let isMonitored = monitoredIds.contains(entry.id)
-                            HStack {
-                                Toggle(isOn: Binding(
-                                    get: { isMonitored },
-                                    set: { newValue in
-                                        if newValue {
-                                            manager.addProvider(Provider(from: entry))
-                                            logger.info("Added from catalog: \(entry.name)")
-                                        } else {
-                                            if let provider = manager.providers.first(where: { $0.catalogEntryId == entry.id }) {
-                                                manager.removeProvider(provider)
-                                                logger.info("Removed from catalog: \(entry.name)")
-                                            }
-                                        }
-                                    }
-                                )) {
-                                    Text(entry.name)
-                                        .font(.body)
-                                }
-                                .toggleStyle(.checkbox)
-                            }
+                            catalogToggle(for: entry)
                         }
                     } label: {
                         HStack {
@@ -405,6 +368,27 @@ struct CatalogSettingsView: View {
             }
             .listStyle(.inset)
         }
+    }
+
+    @ViewBuilder
+    private func catalogToggle(for entry: CatalogEntry) -> some View {
+        let isMonitored = monitoredIds.contains(entry.id)
+        Toggle(isOn: Binding(
+            get: { isMonitored },
+            set: { newValue in
+                if newValue {
+                    manager.addProvider(Provider(from: entry))
+                    logger.info("Added from catalog: \(entry.name)")
+                } else if let provider = manager.providers.first(where: { $0.catalogEntryId == entry.id }) {
+                    manager.removeProvider(provider)
+                    logger.info("Removed from catalog: \(entry.name)")
+                }
+            }
+        )) {
+            Text(entry.name)
+                .font(.body)
+        }
+        .toggleStyle(.checkbox)
     }
 }
 

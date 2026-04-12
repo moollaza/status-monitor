@@ -21,11 +21,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover!
     let statusManager = StatusManager()
     private var eventMonitor: Any?
+    private var localEventMonitor: Any?
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("App launching")
 
+        UserDefaults.standard.register(defaults: ["notificationsEnabled": true])
         NSApp.setActivationPolicy(.accessory)
 
         UNUserNotificationCenter.current().delegate = NotificationService.shared
@@ -59,10 +61,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.popover.performClose(nil)
         }
 
-        // Keyboard shortcut: Cmd+R to refresh
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        // Keyboard shortcut: Cmd+R to refresh (only when popover is shown)
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.popover.isShown else { return event }
             if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "r" {
-                self?.statusManager.pollAll()
+                self.statusManager.pollAll()
                 return nil
             }
             return event
@@ -125,6 +128,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
+        }
+        if let monitor = localEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            localEventMonitor = nil
         }
     }
 
