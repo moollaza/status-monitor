@@ -163,9 +163,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   let status = notification.userInfo?["status"] as? ComponentStatus,
                   let self = self else { return }
             if let idx = self.statusManager.snapshots.firstIndex(where: { $0.id == id }) {
+                let oldStatus = self.statusManager.snapshots[idx].overallStatus
+                let name = self.statusManager.snapshots[idx].name
                 self.statusManager.snapshots[idx] = ProviderSnapshot(
                     id: id,
-                    name: self.statusManager.snapshots[idx].name,
+                    name: name,
                     overallStatus: status,
                     components: self.statusManager.snapshots[idx].components,
                     activeIncidents: self.statusManager.snapshots[idx].activeIncidents,
@@ -173,6 +175,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     error: nil
                 )
                 self.statusManager.recalcWorstStatus()
+                // Fire notification on simulated status change
+                if oldStatus != status {
+                    NotificationService.shared.notify(
+                        providerId: id,
+                        provider: name,
+                        from: oldStatus,
+                        to: status,
+                        incident: nil
+                    )
+                }
                 logger.debug("Simulated status: \(status.label)")
             }
         }

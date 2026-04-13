@@ -245,33 +245,30 @@ struct AddCustomServiceView: View {
 struct CatalogSettingsView: View {
     @Environment(StatusManager.self) var manager
     @State private var searchText = ""
-    @State private var expandedCategories: Set<String> = Set(Catalog.shared.categories)
+    @State private var selectedCategory: String? = nil
 
     private var catalog: Catalog { Catalog.shared }
-
-    private static let popularIds: Set<String> = [
-        "github", "cloudflare", "vercel", "openai", "anthropic",
-        "stripe", "discord", "notion", "figma", "datadog"
-    ]
-
-    private var popularEntries: [CatalogEntry] {
-        catalog.entries.filter { Self.popularIds.contains($0.id) }
-    }
 
     private var monitoredIds: Set<String> {
         Set(manager.providers.compactMap(\.catalogEntryId))
     }
 
-    private var filteredEntries: [(String, [CatalogEntry])] {
-        catalog.categories.compactMap { category in
-            let entries: [CatalogEntry]
-            if searchText.isEmpty {
-                entries = catalog.entries(in: category)
-            } else {
-                entries = catalog.search(searchText).filter { $0.category == category }
-            }
-            return entries.isEmpty ? nil : (category, entries)
+    private var displayedEntries: [CatalogEntry] {
+        var entries: [CatalogEntry]
+        if !searchText.isEmpty {
+            entries = catalog.search(searchText)
+        } else if let category = selectedCategory {
+            entries = catalog.entries(in: category)
+        } else {
+            entries = catalog.entries
         }
+        return entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var categoriesWithCounts: [(String, Int)] {
+        catalog.categories.map { cat in
+            (cat, catalog.entries(in: cat).count)
+        }.sorted { $0.1 > $1.1 }
     }
 
     var body: some View {
@@ -314,64 +311,95 @@ struct CatalogSettingsView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
-            Divider()
-
-            // Category list
-            List {
-                // Popular services (shown when not searching)
-                if searchText.isEmpty && !popularEntries.isEmpty {
-                    Section("Popular") {
-                        ForEach(popularEntries) { entry in
-                            catalogToggle(for: entry)
+            // Category chips (horizontal scroll)
+            if searchText.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        CategoryChip(label: "All", count: catalog.entries.count, isSelected: selectedCategory == nil) {
+                            selectedCategory = nil
+                        }
+                        ForEach(categoriesWithCounts, id: \.0) { category, count in
+                            CategoryChip(label: category, count: count, isSelected: selectedCategory == category) {
+                                selectedCategory = selectedCategory == category ? nil : category
+                            }
                         }
                     }
-                }
-
-                ForEach(filteredEntries, id: \.0) { category, entries in
-                    DisclosureGroup(
-                        isExpanded: Binding(
-                            get: { expandedCategories.contains(category) },
-                            set: { if $0 { expandedCategories.insert(category) } else { expandedCategories.remove(category) } }
-                        )
-                    ) {
-                        ForEach(entries) { entry in
-                            catalogToggle(for: entry)
-                        }
-                    } label: {
-                        HStack {
-                            Text(category)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            Text("(\(entries.count))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
                 }
             }
-            .listStyle(.inset)
+
+            Divider()
+
+            // Flat service list with lazy loading
+            List {
+                ForEach(displayedEntries) { entry in
+                    catalogToggle(for: entry)
+                }
+            }
+            .listStyle(.inset(alternatesRowBackgrounds: true))
         }
     }
 
     @ViewBuilder
     private func catalogToggle(for entry: CatalogEntry) -> some View {
         let isMonitored = monitoredIds.contains(entry.id)
-        Toggle(isOn: Binding(
-            get: { isMonitored },
-            set: { newValue in
-                if newValue {
-                    manager.addProvider(Provider(from: entry))
-                    logger.info("Added from catalog: \(entry.name)")
-                } else if let provider = manager.providers.first(where: { $0.catalogEntryId == entry.id }) {
-                    manager.removeProvider(provider)
-                    logger.info("Removed from catalog: \(entry.name)")
+        HStack {
+            Toggle(isOn: Binding(
+                get: { isMonitored },
+                set: { newValue in
+                    if newValue {
+                        manager.addProvider(Provider(from: entry))
+                        logger.info("Added from catalog: \(entry.name)")
+                    } else if let provider = manager.providers.first(where: { $0.catalogEntryId == entry.id }) {
+                        manager.removeProvider(provider)
+                        logger.info("Removed from catalog: \(entry.name)")
+                    }
                 }
+            )) {
+                Text(entry.name)
+                    .font(.body)
             }
-        )) {
-            Text(entry.name)
-                .font(.body)
+            .toggleStyle(.checkbox)
+
+            Spacer()
+
+            Text(entry.category)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
-        .toggleStyle(.checkbox)
+    }
+}
+
+// MARK: - Category Chip
+
+struct CategoryChip: View {
+    let label: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.caption)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                Text("\(count)")
+                    .font(.caption2)
+                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(isSelected ? Color.accentColor : isHovered ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : Color(nsColor: .controlBackgroundColor))
+            )
+            .foregroundStyle(isSelected ? .white : .primary)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 

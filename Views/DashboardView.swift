@@ -374,16 +374,26 @@ struct ProviderRowView: View {
 struct StatusBadge: View {
     let label: String
     let color: Color
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Text(label)
             .font(.caption2)
-            .fontWeight(.medium)
-            .foregroundColor(color)
+            .fontWeight(.semibold)
+            .foregroundColor(badgeTextColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(color.opacity(0.12))
+            .background(color.opacity(colorScheme == .dark ? 0.25 : 0.15))
             .clipShape(Capsule())
+    }
+
+    private var badgeTextColor: Color {
+        // Use darker shades for better contrast on light backgrounds
+        if colorScheme == .dark {
+            return color
+        }
+        // In light mode, darken the text color for readability
+        return Color(nsColor: NSColor(color)?.blended(withFraction: 0.3, of: .black) ?? .labelColor)
     }
 }
 
