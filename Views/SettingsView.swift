@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import UserNotifications
 import OSLog
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "ui")
@@ -47,7 +48,7 @@ struct SettingsView: View {
             Group {
                 switch selectedTab {
                 case .services:
-                    ServicesSettingsView()
+                    ServicesSettingsView(onAddServices: { selectedTab = .catalog })
                         .environment(manager)
                 case .catalog:
                     CatalogSettingsView()
@@ -70,6 +71,7 @@ struct SettingsView: View {
 
 struct ServicesSettingsView: View {
     @Environment(StatusManager.self) var manager
+    var onAddServices: (() -> Void)?
     @State private var providerToRemove: Provider?
     @State private var showAddCustom = false
     @State private var sortOrder = [KeyPathComparator(\Provider.name, comparator: .localizedStandard)]
@@ -88,19 +90,26 @@ struct ServicesSettingsView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button("Browse Catalog") { onAddServices?() }
+                    .controlSize(.small)
                 Button("Add Custom...") { showAddCustom = true }
                     .controlSize(.small)
             }
             .padding()
 
             if manager.providers.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: 12) {
                     Text("No services added")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text("Go to the Catalog tab to add services.")
+                    Text("Browse the catalog to find services to monitor.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    Button("Add Services") {
+                        onAddServices?()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -246,6 +255,12 @@ struct CatalogSettingsView: View {
     @Environment(StatusManager.self) var manager
     @State private var searchText = ""
     @State private var selectedCategory: String? = nil
+    @State private var visibleCount = 100
+    @State private var suggestions: [CatalogEntry] = []
+    @State private var suggestionsGenerated = false
+
+    private static let pageSize = 100
+    private static let suggestedTag = "__suggested__"
 
     private var catalog: Catalog { Catalog.shared }
 
@@ -253,22 +268,33 @@ struct CatalogSettingsView: View {
         Set(manager.providers.compactMap(\.catalogEntryId))
     }
 
-    private var displayedEntries: [CatalogEntry] {
-        var entries: [CatalogEntry]
-        if !searchText.isEmpty {
-            entries = catalog.search(searchText)
-        } else if let category = selectedCategory {
-            entries = catalog.entries(in: category)
-        } else {
-            entries = catalog.entries
-        }
-        return entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    private var unmonitoredSuggestions: [CatalogEntry] {
+        suggestions.filter { !monitoredIds.contains($0.id) }
     }
 
-    private var categoriesWithCounts: [(String, Int)] {
-        catalog.categories.map { cat in
-            (cat, catalog.entries(in: cat).count)
-        }.sorted { $0.1 > $1.1 }
+    private var isSuggestedCategory: Bool {
+        selectedCategory == Self.suggestedTag
+    }
+
+    private var allFilteredEntries: [CatalogEntry] {
+        if !searchText.isEmpty {
+            return catalog.search(searchText)
+        } else if isSuggestedCategory {
+            return unmonitoredSuggestions
+        } else if let category = selectedCategory {
+            return catalog.entries(in: category)
+        } else {
+            return catalog.entries
+        }
+    }
+
+    private var displayedEntries: [CatalogEntry] {
+        Array(allFilteredEntries.prefix(visibleCount))
+    }
+
+    private func generateSuggestions() {
+        suggestions = catalog.suggestFromInstalledApps()
+        suggestionsGenerated = true
     }
 
     var body: some View {
@@ -311,33 +337,103 @@ struct CatalogSettingsView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
-            // Category chips (horizontal scroll)
+            // Category picker
             if searchText.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        CategoryChip(label: "All", count: catalog.entries.count, isSelected: selectedCategory == nil) {
-                            selectedCategory = nil
-                        }
-                        ForEach(categoriesWithCounts, id: \.0) { category, count in
-                            CategoryChip(label: category, count: count, isSelected: selectedCategory == category) {
-                                selectedCategory = selectedCategory == category ? nil : category
-                            }
+                HStack {
+                    Picker("Category", selection: $selectedCategory) {
+                        Text("All Categories (\(catalog.entries.count))")
+                            .tag(nil as String?)
+                        Divider()
+                        Label("Suggested for You", systemImage: "laptopcomputer")
+                            .tag(Self.suggestedTag as String?)
+                        Divider()
+                        ForEach(catalog.categoryCounts, id: \.0) { category, count in
+                            Text("\(category) (\(count))")
+                                .tag(category as String?)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
             }
 
             Divider()
 
-            // Flat service list with lazy loading
-            List {
-                ForEach(displayedEntries) { entry in
-                    catalogToggle(for: entry)
+            // Service list with progressive loading
+            if isSuggestedCategory && !suggestionsGenerated {
+                // First time viewing Suggested — prompt to scan
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "laptopcomputer")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary)
+                    Text("Find services from your installed apps")
+                        .font(.headline)
+                    Text("Scans app names in /Applications to match against the catalog.\nNo data leaves your device.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Scan Apps") {
+                        generateSuggestions()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    Spacer()
                 }
+                .frame(maxWidth: .infinity)
+                .padding()
+            } else {
+                List {
+                    if isSuggestedCategory {
+                        // Privacy note + regenerate for Suggested
+                        Section {
+                            ForEach(displayedEntries) { entry in
+                                catalogToggle(for: entry)
+                            }
+                        } footer: {
+                            HStack {
+                                Text("Based on apps in /Applications. Nothing leaves your device.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                Spacer()
+                                Button("Rescan") { generateSuggestions() }
+                                    .font(.caption2)
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if unmonitoredSuggestions.isEmpty && suggestionsGenerated {
+                            Section {
+                                Text("No suggestions found. Try adding more apps or browse the catalog.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                        }
+                    } else {
+                        Section(searchText.isEmpty && selectedCategory == nil ? "All Services" : "") {
+                            ForEach(displayedEntries) { entry in
+                                catalogToggle(for: entry)
+                            }
+                            if visibleCount < allFilteredEntries.count {
+                                Button("Show More (\(allFilteredEntries.count - visibleCount) remaining)") {
+                                    visibleCount += Self.pageSize
+                                }
+                                .frame(maxWidth: .infinity)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .onChange(of: selectedCategory) { visibleCount = Self.pageSize }
+                .onChange(of: searchText) { visibleCount = Self.pageSize }
             }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
         }
     }
 
@@ -357,16 +453,25 @@ struct CatalogSettingsView: View {
                     }
                 }
             )) {
-                Text(entry.name)
-                    .font(.body)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.name)
+                        .font(.body)
+                    if let host = URL(string: entry.baseURL)?.host {
+                        Text(host)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
             .toggleStyle(.checkbox)
 
             Spacer()
 
-            Text(entry.category)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            if selectedCategory == nil {
+                Text(entry.category)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

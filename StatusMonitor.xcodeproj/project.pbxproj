@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		865777792F8DA018001FF1AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 865777782F8DA018001FF1AB /* Assets.xcassets */; };
 		8673B27C2F884C760063B14E /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8673B2732F884C760063B14E /* NotificationService.swift */; };
 		8673B27D2F884C760063B14E /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8673B2792F884C760063B14E /* DashboardView.swift */; };
 		8673B27E2F884C760063B14E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8673B27A2F884C760063B14E /* SettingsView.swift */; };
@@ -15,10 +16,10 @@
 		8673B2812F884C760063B14E /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8673B2712F884C760063B14E /* Models.swift */; };
 		8673B2822F884C760063B14E /* StatusManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8673B2752F884C760063B14E /* StatusManager.swift */; };
 		8673B2832F884C760063B14E /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8673B2702F884C760063B14E /* Info.plist */; };
+		AA00000100000001000CATJN /* catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000100000002000CATJN /* catalog.json */; };
 		AA00000100000006000SIVEW /* ServiceIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000007000SIVEW /* ServiceIconView.swift */; };
 		AA00000100000008000FBVEW /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000009000FBVEW /* FeedbackView.swift */; };
 		AA0000010000000A000SDVEW /* ServiceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000010000000B000SDVEW /* ServiceDetailView.swift */; };
-		AA00000100000001000CATJN /* catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000100000002000CATJN /* catalog.json */; };
 		BB00000100000001000CATTF /* CatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000002000CATTF /* CatalogTests.swift */; };
 		BB00000100000003000CODTF /* CodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000004000CODTF /* CodableTests.swift */; };
 		BB00000100000005000CMPTF /* ComponentStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000006000CMPTF /* ComponentStatusTests.swift */; };
@@ -38,6 +39,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		865777782F8DA018001FF1AB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8673B25C2F884BFF0063B14E /* StatusMonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StatusMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8673B2702F884C760063B14E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8673B2712F884C760063B14E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -136,6 +138,7 @@
 		AA00000100000003000RESRC /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				865777782F8DA018001FF1AB /* Assets.xcassets */,
 				AA00000100000002000CATJN /* catalog.json */,
 			);
 			path = Resources;
@@ -241,6 +244,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8673B2832F884C760063B14E /* Info.plist in Resources */,
+				865777792F8DA018001FF1AB /* Assets.xcassets in Resources */,
 				AA00000100000001000CATJN /* catalog.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -149,10 +149,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateTooltip()
         }
 
-        // First launch → auto-open panel
+        // First launch → auto-open panel (slight delay so menu bar button window is ready)
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             logger.info("First launch — opening panel")
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.togglePanel()
             }
         }
@@ -162,30 +162,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let id = notification.userInfo?["id"] as? UUID,
                   let status = notification.userInfo?["status"] as? ComponentStatus,
                   let self = self else { return }
-            if let idx = self.statusManager.snapshots.firstIndex(where: { $0.id == id }) {
-                let oldStatus = self.statusManager.snapshots[idx].overallStatus
-                let name = self.statusManager.snapshots[idx].name
-                self.statusManager.snapshots[idx] = ProviderSnapshot(
-                    id: id,
-                    name: name,
-                    overallStatus: status,
-                    components: self.statusManager.snapshots[idx].components,
-                    activeIncidents: self.statusManager.snapshots[idx].activeIncidents,
-                    lastUpdated: Date(),
-                    error: nil
-                )
-                self.statusManager.recalcWorstStatus()
-                // Fire notification on simulated status change
-                if oldStatus != status {
-                    NotificationService.shared.notify(
-                        providerId: id,
-                        provider: name,
-                        from: oldStatus,
-                        to: status,
-                        incident: nil
+            Task { @MainActor in
+                if let idx = self.statusManager.snapshots.firstIndex(where: { $0.id == id }) {
+                    let oldStatus = self.statusManager.snapshots[idx].overallStatus
+                    let name = self.statusManager.snapshots[idx].name
+                    self.statusManager.snapshots[idx] = ProviderSnapshot(
+                        id: id,
+                        name: name,
+                        overallStatus: status,
+                        components: self.statusManager.snapshots[idx].components,
+                        activeIncidents: self.statusManager.snapshots[idx].activeIncidents,
+                        lastUpdated: Date(),
+                        error: nil
                     )
+                    self.statusManager.recalcWorstStatus()
+                    // Fire notification on simulated status change
+                    if oldStatus != status {
+                        NotificationService.shared.notify(
+                            providerId: id,
+                            provider: name,
+                            from: oldStatus,
+                            to: status,
+                            incident: nil
+                        )
+                    }
+                    logger.debug("Simulated status: \(status.label)")
                 }
-                logger.debug("Simulated status: \(status.label)")
             }
         }
         #endif
@@ -239,8 +241,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let (name, color) = status.iconInfo
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "Status")?
             .withSymbolConfiguration(config)
+        // Use template rendering for operational state so macOS matches menu bar appearance
+        image?.isTemplate = (status == .operational)
         button.image = image
-        button.contentTintColor = color
+        button.contentTintColor = (status == .operational) ? nil : color
     }
 
     private func updateTooltip() {
