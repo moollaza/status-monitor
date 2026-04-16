@@ -27,6 +27,9 @@
 		BB00000100000009000RSSTF /* RSSParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000A000RSSTF /* RSSParserTests.swift */; };
 		BB0000010000000B000SMGTF /* StatusManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000C000SMGTF /* StatusManagerTests.swift */; };
 		BB0000010000000F000POLTF /* StatusManagerPollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000010000POLTF /* StatusManagerPollTests.swift */; };
+		BB00000100000011000NFYTF /* NotificationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000012000NFYTF /* NotificationServiceTests.swift */; };
+		BB00000100000013000PRSTF /* StatusManagerPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000014000PRSTF /* StatusManagerPersistenceTests.swift */; };
+		BB00000100000015000BOFTF /* StatusManagerBackoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000016000BOFTF /* StatusManagerBackoffTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +65,9 @@
 		BB0000010000000A000RSSTF /* RSSParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParserTests.swift; sourceTree = "<group>"; };
 		BB0000010000000C000SMGTF /* StatusManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusManagerTests.swift; sourceTree = "<group>"; };
 		BB00000100000010000POLTF /* StatusManagerPollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusManagerPollTests.swift; sourceTree = "<group>"; };
+		BB00000100000012000NFYTF /* NotificationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceTests.swift; sourceTree = "<group>"; };
+		BB00000100000014000PRSTF /* StatusManagerPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusManagerPersistenceTests.swift; sourceTree = "<group>"; };
+		BB00000100000016000BOFTF /* StatusManagerBackoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusManagerBackoffTests.swift; sourceTree = "<group>"; };
 		BB0000010000000E000XCTEST /* StatusMonitorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StatusMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -156,6 +162,9 @@
 				BB0000010000000A000RSSTF /* RSSParserTests.swift */,
 				BB0000010000000C000SMGTF /* StatusManagerTests.swift */,
 				BB00000100000010000POLTF /* StatusManagerPollTests.swift */,
+				BB00000100000012000NFYTF /* NotificationServiceTests.swift */,
+				BB00000100000014000PRSTF /* StatusManagerPersistenceTests.swift */,
+				BB00000100000016000BOFTF /* StatusManagerBackoffTests.swift */,
 			);
 			path = StatusMonitorTests;
 			sourceTree = "<group>";
@@ -290,6 +299,9 @@
 				BB00000100000009000RSSTF /* RSSParserTests.swift in Sources */,
 				BB0000010000000B000SMGTF /* StatusManagerTests.swift in Sources */,
 				BB0000010000000F000POLTF /* StatusManagerPollTests.swift in Sources */,
+				BB00000100000011000NFYTF /* NotificationServiceTests.swift in Sources */,
+				BB00000100000013000PRSTF /* StatusManagerPersistenceTests.swift in Sources */,
+				BB00000100000015000BOFTF /* StatusManagerBackoffTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

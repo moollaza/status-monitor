@@ -57,7 +57,7 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
         // request — log loudly so the dropped transition is still traceable.
         switch authorizationStatus {
         case .denied:
-            logger.warning("Not posting notification for \(provider): authorization denied")
+            logger.warning("Not posting notification for \(provider, privacy: .public): authorization denied")
             return
         case .notDetermined:
             // Permission prompt hasn't resolved yet; the add() call will itself
@@ -69,6 +69,31 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
             break
         }
 
+        let request = Self.makeRequest(
+            providerId: providerId,
+            provider: provider,
+            from: from,
+            to: to,
+            incident: incident
+        )
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                logger.error("Failed to deliver notification for \(provider, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Pure builder for the notification request. Extracted so tests can
+    /// inspect title / body / sound / identifier / userInfo without needing
+    /// to intercept UNUserNotificationCenter.
+    static func makeRequest(
+        providerId: UUID,
+        provider: String,
+        from: ComponentStatus,
+        to: ComponentStatus,
+        incident: String?
+    ) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = "\(provider): \(to.label)"
 
@@ -80,30 +105,23 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
             content.body = "Status improved to \(to.label)"
         }
 
-        // Sound: critical for outages, default for others
+        // Sound: critical for outages, default for other non-green states, silent on recovery.
         if to == .majorOutage {
             content.sound = .defaultCritical
         } else if to.severity > ComponentStatus.operational.severity {
             content.sound = .default
         }
 
-        // Include provider ID for deep-linking on tap
         content.userInfo = ["providerId": providerId.uuidString]
 
         // Stable identifier per provider so a newer notification REPLACES the
         // prior one for the same service (prevents flap-spam in Notification
         // Center when a service oscillates operational↔︎degraded).
-        let request = UNNotificationRequest(
+        return UNNotificationRequest(
             identifier: "status-\(providerId.uuidString)",
             content: content,
             trigger: nil
         )
-
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                logger.error("Failed to deliver notification for \(provider): \(error.localizedDescription)")
-            }
-        }
     }
 
     // Show notification even when app is in foreground

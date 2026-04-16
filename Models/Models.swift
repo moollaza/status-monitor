@@ -30,20 +30,19 @@ struct Catalog {
     let categoryCounts: [(String, Int)]
 
     static let shared: Catalog = {
-        guard let url = Bundle.main.url(forResource: "catalog", withExtension: "json") else {
-            catalogLogger.error("catalog.json missing from app bundle — catalog will be empty")
+        // catalog.json ships in the app bundle and is generated + validated
+        // by `scripts/audit-catalog.py`. A missing or malformed file is a
+        // build regression, not a runtime condition — fail loud in DEBUG so
+        // the problem surfaces immediately, and gracefully fall back to an
+        // empty catalog in release so the app still launches.
+        guard let url = Bundle.main.url(forResource: "catalog", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let entries = try? JSONDecoder().decode([CatalogEntry].self, from: data) else {
+            catalogLogger.error("Failed to load catalog.json — shipping a broken bundle?")
+            assertionFailure("catalog.json missing or malformed — check scripts/audit-catalog.py")
             return Catalog(entries: [], categories: [], categoryCounts: [])
         }
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch {
-            catalogLogger.error("Failed to read catalog.json: \(error.localizedDescription)")
-            return Catalog(entries: [], categories: [], categoryCounts: [])
-        }
-        // Per-entry tolerant decode so one malformed row doesn't nuke the whole file.
-        let decoded = decodeTolerantly(data: data)
-        let sorted = decoded.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let sorted = entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         let categories = Array(Set(sorted.map(\.category))).sorted()
         var countsByCategory: [String: Int] = [:]
         for entry in sorted { countsByCategory[entry.category, default: 0] += 1 }
@@ -51,32 +50,6 @@ struct Catalog {
         catalogLogger.info("Loaded \(sorted.count) catalog entries")
         return Catalog(entries: sorted, categories: categories, categoryCounts: categoryCounts)
     }()
-
-    /// Decodes a JSON array of CatalogEntry tolerantly — a single malformed entry
-    /// is skipped with a warning rather than failing the whole file.
-    private static func decodeTolerantly(data: Data) -> [CatalogEntry] {
-        let decoder = JSONDecoder()
-        // Fast path: well-formed file decodes in one shot.
-        if let entries = try? decoder.decode([CatalogEntry].self, from: data) {
-            return entries
-        }
-        // Slow path: decode as array of raw JSON values, attempt each separately.
-        guard let anyArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            catalogLogger.error("catalog.json is not a JSON array of objects")
-            return []
-        }
-        var results: [CatalogEntry] = []
-        for (idx, item) in anyArray.enumerated() {
-            guard let itemData = try? JSONSerialization.data(withJSONObject: item),
-                  let entry = try? decoder.decode(CatalogEntry.self, from: itemData) else {
-                let name = (item["name"] as? String) ?? "<unknown>"
-                catalogLogger.warning("Skipped malformed catalog entry #\(idx) (\(name))")
-                continue
-            }
-            results.append(entry)
-        }
-        return results
-    }
 
     func entries(in category: String) -> [CatalogEntry] {
         entries.filter { $0.category == category }

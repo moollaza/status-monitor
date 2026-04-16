@@ -31,6 +31,9 @@ class StatusManager {
 
     let session: URLSession
     let notifier: NotificationServicing
+    let defaults: UserDefaults
+    /// Injectable clock so tests can drive backoff deterministically.
+    let now: () -> Date
 
     static let defaultSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral   // no shared cookies / cache
@@ -61,10 +64,14 @@ class StatusManager {
 
     init(
         session: URLSession = StatusManager.defaultSession,
-        notifier: NotificationServicing = NotificationService.shared
+        notifier: NotificationServicing = NotificationService.shared,
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init
     ) {
         self.session = session
         self.notifier = notifier
+        self.defaults = defaults
+        self.now = now
         loadProviders()
         observeSleepWake()
     }
@@ -106,7 +113,7 @@ class StatusManager {
     // MARK: - Provider Persistence
 
     func loadProviders() {
-        guard let data = UserDefaults.standard.data(forKey: "providers") else {
+        guard let data = defaults.data(forKey: "providers") else {
             providers = []
             return
         }
@@ -114,8 +121,8 @@ class StatusManager {
             let saved = try JSONDecoder().decode([Provider].self, from: data)
             if !saved.isEmpty {
                 providers = saved
-                if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-                    UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                if !defaults.bool(forKey: "hasCompletedOnboarding") {
+                    defaults.set(true, forKey: "hasCompletedOnboarding")
                 }
             } else {
                 providers = []
@@ -124,7 +131,7 @@ class StatusManager {
             // Schema mismatch or corruption — back up the bad blob so it can be
             // recovered manually, then start fresh rather than silently empty.
             let backupKey = "providers_corrupt_\(Int(Date().timeIntervalSince1970))"
-            UserDefaults.standard.set(data, forKey: backupKey)
+            defaults.set(data, forKey: backupKey)
             logger.error("Failed to decode persisted providers (\(error.localizedDescription)). Backed up raw data at \(backupKey).")
             providers = []
         }
@@ -133,7 +140,7 @@ class StatusManager {
     func saveProviders() {
         do {
             let data = try JSONEncoder().encode(providers)
-            UserDefaults.standard.set(data, forKey: "providers")
+            defaults.set(data, forKey: "providers")
         } catch {
             logger.error("Failed to encode providers for persistence: \(error.localizedDescription)")
         }
@@ -154,8 +161,8 @@ class StatusManager {
         schedulePolling(for: provider)
         Task { await poll(provider: provider) }
         // Mark onboarding complete when first provider is added
-        if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        if !defaults.bool(forKey: "hasCompletedOnboarding") {
+            defaults.set(true, forKey: "hasCompletedOnboarding")
         }
         logger.info("Added provider: \(provider.name)")
         return true
@@ -280,7 +287,7 @@ class StatusManager {
            let failures = failureCounts[provider.id], failures > 0,
            let lastFail = lastFailure[provider.id] {
             let backoffSeconds = backoffWindow(for: provider, failures: failures)
-            let elapsed = max(0, Date().timeIntervalSince(lastFail))
+            let elapsed = max(0, now().timeIntervalSince(lastFail))
             if elapsed < backoffSeconds {
                 return
             }
@@ -374,7 +381,7 @@ class StatusManager {
     private func recordFailure(for provider: Provider) {
         let count = (failureCounts[provider.id] ?? 0) + 1
         failureCounts[provider.id] = count
-        lastFailure[provider.id] = Date()
+        lastFailure[provider.id] = now()
         let backoff = min(Double(provider.pollIntervalSeconds) * pow(2, Double(min(count, 5))), 3600)
         logger.warning("Poll failure #\(count) for \(provider.name), backing off \(Int(backoff))s")
     }
