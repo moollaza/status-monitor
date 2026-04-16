@@ -1,5 +1,8 @@
 import Foundation
 import AppKit
+import OSLog
+
+private let catalogLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "catalog")
 
 // MARK: - Catalog Entry (read-only reference data)
 
@@ -27,19 +30,53 @@ struct Catalog {
     let categoryCounts: [(String, Int)]
 
     static let shared: Catalog = {
-        guard let url = Bundle.main.url(forResource: "catalog", withExtension: "json"),
-              let data = try? Data(contentsOf: url) else {
+        guard let url = Bundle.main.url(forResource: "catalog", withExtension: "json") else {
+            catalogLogger.error("catalog.json missing from app bundle — catalog will be empty")
             return Catalog(entries: [], categories: [], categoryCounts: [])
         }
-        let decoder = JSONDecoder()
-        let decoded = (try? decoder.decode([CatalogEntry].self, from: data)) ?? []
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            catalogLogger.error("Failed to read catalog.json: \(error.localizedDescription)")
+            return Catalog(entries: [], categories: [], categoryCounts: [])
+        }
+        // Per-entry tolerant decode so one malformed row doesn't nuke the whole file.
+        let decoded = decodeTolerantly(data: data)
         let sorted = decoded.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         let categories = Array(Set(sorted.map(\.category))).sorted()
         var countsByCategory: [String: Int] = [:]
         for entry in sorted { countsByCategory[entry.category, default: 0] += 1 }
         let categoryCounts = categories.map { ($0, countsByCategory[$0] ?? 0) }.sorted { $0.1 > $1.1 }
+        catalogLogger.info("Loaded \(sorted.count) catalog entries")
         return Catalog(entries: sorted, categories: categories, categoryCounts: categoryCounts)
     }()
+
+    /// Decodes a JSON array of CatalogEntry tolerantly — a single malformed entry
+    /// is skipped with a warning rather than failing the whole file.
+    private static func decodeTolerantly(data: Data) -> [CatalogEntry] {
+        let decoder = JSONDecoder()
+        // Fast path: well-formed file decodes in one shot.
+        if let entries = try? decoder.decode([CatalogEntry].self, from: data) {
+            return entries
+        }
+        // Slow path: decode as array of raw JSON values, attempt each separately.
+        guard let anyArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            catalogLogger.error("catalog.json is not a JSON array of objects")
+            return []
+        }
+        var results: [CatalogEntry] = []
+        for (idx, item) in anyArray.enumerated() {
+            guard let itemData = try? JSONSerialization.data(withJSONObject: item),
+                  let entry = try? decoder.decode(CatalogEntry.self, from: itemData) else {
+                let name = (item["name"] as? String) ?? "<unknown>"
+                catalogLogger.warning("Skipped malformed catalog entry #\(idx) (\(name))")
+                continue
+            }
+            results.append(entry)
+        }
+        return results
+    }
 
     func entries(in category: String) -> [CatalogEntry] {
         entries.filter { $0.category == category }
@@ -158,19 +195,30 @@ struct Provider: Identifiable, Codable, Equatable {
     var hasValidURL: Bool {
         guard let url = URL(string: baseURL),
               let scheme = url.scheme?.lowercased(),
-              ["https", "http"].contains(scheme) else {
+              scheme == "https",
+              let host = url.host,
+              !host.isEmpty else {
             return false
         }
         return true
     }
 
     var apiURL: URL? {
+        guard hasValidURL else { return nil }
         switch type {
         case .statuspage:
             return URL(string: "\(baseURL)/api/v2/summary.json")
         case .rss:
             return URL(string: baseURL)
         }
+    }
+
+    /// URL suitable for opening in the user's browser (NSWorkspace.open). Nil
+    /// when the baseURL is not a valid https URL — prevents `file://`,
+    /// `javascript:`, `x-apple.*` and other schemes from reaching NSWorkspace.
+    var externalURL: URL? {
+        guard hasValidURL, let url = URL(string: baseURL) else { return nil }
+        return url
     }
 
     static let defaults: [Provider] = []
@@ -282,11 +330,11 @@ enum ComponentStatus: String, Codable, Comparable {
     var severity: Int {
         switch self {
         case .operational: return 0
-        case .degradedPerformance: return 1
-        case .underMaintenance: return 1
-        case .partialOutage: return 2
-        case .majorOutage: return 3
-        case .unknown: return -1
+        case .unknown: return 1            // elevated so unrecognised/errored state surfaces instead of masquerading as healthy
+        case .degradedPerformance: return 2
+        case .underMaintenance: return 2
+        case .partialOutage: return 3
+        case .majorOutage: return 4
         }
     }
 

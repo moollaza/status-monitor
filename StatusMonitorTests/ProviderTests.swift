@@ -50,7 +50,8 @@ final class ProviderTests: XCTestCase {
     func testInitFromCatalogEntry() {
         let entry = CatalogEntry(id: "github", name: "GitHub",
                                   baseURL: "https://www.githubstatus.com",
-                                  type: .statuspage, category: "Developer Tools")
+                                  type: .statuspage, category: "Developer Tools",
+                                  platform: "atlassian")
         let p = Provider(from: entry)
         XCTAssertEqual(p.name, "GitHub")
         XCTAssertEqual(p.baseURL, "https://www.githubstatus.com")
@@ -61,7 +62,8 @@ final class ProviderTests: XCTestCase {
     func testInitFromCatalogEntryRSSType() {
         let entry = CatalogEntry(id: "rss-service", name: "RSS Service",
                                   baseURL: "https://example.com/rss",
-                                  type: .rss, category: "Other")
+                                  type: .rss, category: "Other",
+                                  platform: nil)
         let p = Provider(from: entry)
         XCTAssertEqual(p.type, .rss)
     }
@@ -73,9 +75,9 @@ final class ProviderTests: XCTestCase {
         XCTAssertTrue(p.hasValidURL)
     }
 
-    func testHasValidURLAcceptsHTTP() {
+    func testHasValidURLRejectsHTTP() {
         let p = Provider(name: "X", baseURL: "http://status.github.com")
-        XCTAssertTrue(p.hasValidURL)
+        XCTAssertFalse(p.hasValidURL, "http:// should no longer be accepted — https-only for network clients")
     }
 
     func testHasValidURLRejectsNoScheme() {
@@ -91,6 +93,16 @@ final class ProviderTests: XCTestCase {
     func testHasValidURLRejectsJavascript() {
         let p = Provider(name: "X", baseURL: "javascript:alert(1)")
         XCTAssertFalse(p.hasValidURL)
+    }
+
+    func testHasValidURLRejectsFile() {
+        let p = Provider(name: "X", baseURL: "file:///etc/passwd")
+        XCTAssertFalse(p.hasValidURL)
+    }
+
+    func testHasValidURLRejectsSchemeOnly() {
+        let p = Provider(name: "X", baseURL: "https://")
+        XCTAssertFalse(p.hasValidURL, "https:// with no host must be rejected")
     }
 
     func testHasValidURLRejectsEmpty() {
@@ -110,11 +122,27 @@ final class ProviderTests: XCTestCase {
         XCTAssertEqual(p.apiURL?.absoluteString, "https://example.com/rss")
     }
 
-    func testAPIURLInvalidBase() {
+    func testAPIURLReturnsNilForUnparseableBase() {
         let p = Provider(name: "X", baseURL: "not a url")
-        // URL(string:) may or may not fail here; just verify it doesn't crash
-        // The important thing is hasValidURL catches this case
-        _ = p.apiURL
+        XCTAssertNil(p.apiURL, "apiURL must refuse to build when baseURL is invalid")
+    }
+
+    func testAPIURLReturnsNilForFileScheme() {
+        let p = Provider(name: "X", baseURL: "file:///etc/passwd")
+        XCTAssertNil(p.apiURL, "apiURL must not be built from non-https schemes")
+    }
+
+    // MARK: - externalURL
+
+    func testExternalURLHTTPS() {
+        let p = Provider(name: "X", baseURL: "https://status.github.com")
+        XCTAssertEqual(p.externalURL?.absoluteString, "https://status.github.com")
+    }
+
+    func testExternalURLRejectsNonHTTPS() {
+        XCTAssertNil(Provider(name: "X", baseURL: "http://example.com").externalURL)
+        XCTAssertNil(Provider(name: "X", baseURL: "file:///etc/hosts").externalURL)
+        XCTAssertNil(Provider(name: "X", baseURL: "javascript:alert(1)").externalURL)
     }
 
     // MARK: - Codable round-trip

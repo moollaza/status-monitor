@@ -209,6 +209,28 @@ struct AddCustomServiceView: View {
     @State private var url = ""
     @State private var type: ProviderType = .statuspage
 
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedURL: String { url.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var candidate: Provider {
+        Provider(name: trimmedName, baseURL: trimmedURL, type: type)
+    }
+
+    private var validationMessage: String? {
+        if trimmedName.isEmpty || trimmedURL.isEmpty { return nil }
+        if !candidate.hasValidURL {
+            return "URL must be a valid https:// address with a host"
+        }
+        if manager.providers.contains(where: { $0.baseURL == candidate.baseURL }) {
+            return "A service with this URL is already being monitored"
+        }
+        return nil
+    }
+
+    private var canSubmit: Bool {
+        !trimmedName.isEmpty && !trimmedURL.isEmpty && validationMessage == nil
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             Text("Add Custom Service")
@@ -231,17 +253,26 @@ struct AddCustomServiceView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            if let message = validationMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(message)
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
                 Button("Add") {
-                    let provider = Provider(name: name, baseURL: url, type: type)
-                    manager.addProvider(provider)
-                    logger.info("Added custom provider: \(name)")
+                    manager.addProvider(candidate)
+                    logger.info("Added custom provider: \(trimmedName)")
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(name.isEmpty || url.isEmpty)
+                .disabled(!canSubmit)
             }
         }
         .padding(20)

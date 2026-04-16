@@ -45,30 +45,49 @@ class StatusManager {
     // MARK: - Provider Persistence
 
     func loadProviders() {
-        if let data = UserDefaults.standard.data(forKey: "providers"),
-           let saved = try? JSONDecoder().decode([Provider].self, from: data),
-           !saved.isEmpty {
-            providers = saved
-            // Migration: existing users who haven't seen onboarding
-            if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-                UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-            }
-        } else if UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-            // User completed onboarding but removed all providers
+        guard let data = UserDefaults.standard.data(forKey: "providers") else {
             providers = []
-        } else {
-            // First launch — onboarding will handle provider selection
+            return
+        }
+        do {
+            let saved = try JSONDecoder().decode([Provider].self, from: data)
+            if !saved.isEmpty {
+                providers = saved
+                if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+                    UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                }
+            } else {
+                providers = []
+            }
+        } catch {
+            // Schema mismatch or corruption — back up the bad blob so it can be
+            // recovered manually, then start fresh rather than silently empty.
+            let backupKey = "providers_corrupt_\(Int(Date().timeIntervalSince1970))"
+            UserDefaults.standard.set(data, forKey: backupKey)
+            logger.error("Failed to decode persisted providers (\(error.localizedDescription)). Backed up raw data at \(backupKey).")
             providers = []
         }
     }
 
     func saveProviders() {
-        if let data = try? JSONEncoder().encode(providers) {
+        do {
+            let data = try JSONEncoder().encode(providers)
             UserDefaults.standard.set(data, forKey: "providers")
+        } catch {
+            logger.error("Failed to encode providers for persistence: \(error.localizedDescription)")
         }
     }
 
-    func addProvider(_ provider: Provider) {
+    @discardableResult
+    func addProvider(_ provider: Provider) -> Bool {
+        guard provider.hasValidURL else {
+            logger.error("Refused to add provider with invalid URL: \(provider.baseURL)")
+            return false
+        }
+        guard !providers.contains(where: { $0.baseURL == provider.baseURL }) else {
+            logger.warning("Refused to add duplicate provider: \(provider.baseURL)")
+            return false
+        }
         providers.append(provider)
         saveProviders()
         schedulePolling(for: provider)
@@ -78,6 +97,7 @@ class StatusManager {
             UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         }
         logger.info("Added provider: \(provider.name)")
+        return true
     }
 
     func updatePollInterval(for provider: Provider, seconds: Int) {
@@ -102,6 +122,8 @@ class StatusManager {
         providers.removeAll { $0.id == provider.id }
         snapshots.removeAll { $0.id == provider.id }
         previousStatuses.removeValue(forKey: provider.id)
+        failureCounts.removeValue(forKey: provider.id)
+        lastFailure.removeValue(forKey: provider.id)
         saveProviders()
         recalcWorstStatus()
     }
@@ -139,13 +161,18 @@ class StatusManager {
     }
 
     private func schedulePolling(for provider: Provider) {
-        timers[provider.id]?.invalidate()
+        let providerId = provider.id
+        timers[providerId]?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(provider.pollIntervalSeconds), repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.poll(provider: provider)
+                // Look up the current provider by ID so mute/name/URL edits take effect
+                // without waiting for a re-schedule.
+                guard let self = self,
+                      let current = self.providers.first(where: { $0.id == providerId }) else { return }
+                await self.poll(provider: current)
             }
         }
-        timers[provider.id] = timer
+        timers[providerId] = timer
     }
 
     private let maxConcurrentPolls = 6
@@ -171,25 +198,35 @@ class StatusManager {
     }
 
     private func poll(provider: Provider) async {
-        // Exponential backoff: skip if we failed recently
+        // Exponential backoff: skip if we failed recently.
+        // `max(0, ...)` guards against wall-clock rollback (NTP/timezone) that
+        // would otherwise leave the gate permanently closed.
         if let failures = failureCounts[provider.id], failures > 0,
            let lastFail = lastFailure[provider.id] {
             let backoffSeconds = min(Double(provider.pollIntervalSeconds) * pow(2, Double(min(failures, 5))), 3600)
-            if Date().timeIntervalSince(lastFail) < backoffSeconds {
-                return // still in backoff window
+            let elapsed = max(0, Date().timeIntervalSince(lastFail))
+            if elapsed < backoffSeconds {
+                return
             }
         }
 
         guard let url = provider.apiURL else {
-            updateSnapshot(for: provider, error: "Invalid URL")
+            recordFailure(for: provider)
+            updateSnapshot(for: provider, error: "Invalid URL — must be https:// with a valid host")
             return
         }
 
         do {
             let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
                 recordFailure(for: provider)
-                updateSnapshot(for: provider, error: "Unable to reach status page")
+                updateSnapshot(for: provider, error: "Non-HTTP response")
+                return
+            }
+            guard (200...299).contains(http.statusCode) else {
+                logger.error("Poll HTTP \(http.statusCode) for \(provider.name)")
+                recordFailure(for: provider)
+                updateSnapshot(for: provider, error: httpErrorMessage(for: http.statusCode))
                 return
             }
 
@@ -198,14 +235,51 @@ class StatusManager {
 
             switch provider.type {
             case .statuspage:
-                try parseStatuspage(data: data, provider: provider)
+                do {
+                    try parseStatuspage(data: data, provider: provider)
+                } catch let error as DecodingError {
+                    logger.error("Statuspage schema mismatch for \(provider.name): \(String(describing: error))")
+                    updateSnapshot(for: provider, error: "Status format not recognized")
+                }
             case .rss:
-                try parseRSS(data: data, provider: provider)
+                do {
+                    try parseRSS(data: data, provider: provider)
+                } catch {
+                    logger.error("RSS parse failed for \(provider.name): \(error.localizedDescription)")
+                    updateSnapshot(for: provider, error: "Could not parse RSS feed")
+                }
             }
+        } catch let urlError as URLError {
+            logger.error("Network error [\(urlError.code.rawValue)] for \(provider.name): \(urlError.localizedDescription)")
+            recordFailure(for: provider)
+            updateSnapshot(for: provider, error: networkErrorMessage(for: urlError))
         } catch {
             logger.error("Poll failed for \(provider.name): \(error.localizedDescription)")
             recordFailure(for: provider)
             updateSnapshot(for: provider, error: "Unable to read status page")
+        }
+    }
+
+    private func httpErrorMessage(for code: Int) -> String {
+        switch code {
+        case 401, 403: return "Access denied (\(code))"
+        case 404: return "Status page not found (404) — URL may have changed"
+        case 429: return "Rate limited (429)"
+        case 500...599: return "Status page unavailable (\(code))"
+        case 300...399: return "Unexpected redirect (\(code))"
+        default: return "HTTP \(code)"
+        }
+    }
+
+    private func networkErrorMessage(for error: URLError) -> String {
+        switch error.code {
+        case .notConnectedToInternet: return "No internet connection"
+        case .timedOut: return "Request timed out"
+        case .cannotFindHost, .dnsLookupFailed: return "Cannot find host"
+        case .cannotConnectToHost: return "Cannot connect to host"
+        case .secureConnectionFailed, .serverCertificateUntrusted:
+            return "Secure connection failed"
+        default: return "Network error"
         }
     }
 
@@ -227,7 +301,7 @@ class StatusManager {
         let decoder = JSONDecoder()
         let summary = try decoder.decode(StatuspageSummary.self, from: data)
 
-        let overall = ComponentStatus(fromIndicator: summary.status.indicator)
+        let indicatorStatus = ComponentStatus(fromIndicator: summary.status.indicator)
 
         // Build group name lookup for child components (e.g., Asana has US, EU, Japan groups)
         var groupNames: [String: String] = [:]
@@ -246,6 +320,13 @@ class StatusManager {
                 }
                 return ComponentSnapshot(id: comp.id, name: displayName, status: ComponentStatus(fromStatuspage: comp.status))
             }
+
+        // Overall status is the worst of the Atlassian indicator and any
+        // component-level status — indicators sometimes lag behind components
+        // during rapid incidents.
+        let componentMax = components.map(\.status).max() ?? .operational
+        let overall = max(indicatorStatus, componentMax)
+
         let incidents = (summary.incidents ?? []).prefix(5).map { incident in
             let updates = (incident.incidentUpdates ?? []).map { update in
                 IncidentUpdateSnapshot(
@@ -283,21 +364,27 @@ class StatusManager {
 
     static func rssStatusHeuristic(title: String, description: String) -> ComponentStatus {
         let text = (title + " " + description).lowercased()
+        // Resolved-first: "Resolved: Major outage" describes a healed incident, not an active one.
+        if text.contains("resolved") || text.contains("completed") || text.contains("closed") {
+            return .operational
+        }
         if text.contains("major") || text.contains("outage") { return .majorOutage }
         if text.contains("partial") { return .partialOutage }
         if text.contains("degraded") || text.contains("elevated") { return .degradedPerformance }
-        if text.contains("resolved") || text.contains("operational") { return .operational }
+        if text.contains("operational") { return .operational }
         return .unknown
     }
 
     private func parseRSS(data: Data, provider: Provider) throws {
         let parser = RSSStatusParser(data: data)
-        let items = parser.parse()
+        let items = try parser.parse()
 
-        // Heuristic: check titles/descriptions for outage keywords
+        // Heuristic: check titles/descriptions for outage keywords.
+        // Empty feed is treated as operational — for status-page RSS, no recent
+        // items typically means no incidents.
         let overall: ComponentStatus = items.first.map { item in
             Self.rssStatusHeuristic(title: item.title, description: item.description)
-        } ?? .unknown
+        } ?? .operational
 
         let incidents = items.prefix(5).map { item -> IncidentSnapshot in
             let itemStatus = Self.rssStatusHeuristic(title: item.title, description: item.description)
@@ -327,6 +414,10 @@ class StatusManager {
     // MARK: - Snapshot Management
 
     private func applySnapshot(_ snapshot: ProviderSnapshot, for provider: Provider) {
+        // Guard against races: the provider may have been removed while this
+        // poll was in flight, and its mute state may have been toggled.
+        guard let current = providers.first(where: { $0.id == provider.id }) else { return }
+
         let previousStatus = previousStatuses[provider.id]
 
         if let idx = snapshots.firstIndex(where: { $0.id == provider.id }) {
@@ -335,11 +426,12 @@ class StatusManager {
             snapshots.append(snapshot)
         }
 
-        // Notify on status change (not on first poll, skip if muted)
-        if !provider.isMuted, let prev = previousStatus, prev != snapshot.overallStatus {
+        // Notify on status change (not on first poll, skip if muted).
+        // Read mute from the current provider, not the captured one.
+        if !current.isMuted, let prev = previousStatus, prev != snapshot.overallStatus {
             NotificationService.shared.notify(
-                providerId: provider.id,
-                provider: provider.name,
+                providerId: current.id,
+                provider: current.name,
                 from: prev,
                 to: snapshot.overallStatus,
                 incident: snapshot.activeIncidents.first?.name
@@ -348,35 +440,61 @@ class StatusManager {
 
         previousStatuses[provider.id] = snapshot.overallStatus
         recalcWorstStatus()
+        onPollCycleComplete?()
     }
 
+    /// Marks a provider's snapshot as errored while preserving the last-good
+    /// status/components/incidents. This way a transient parse or network
+    /// failure mid-incident doesn't wipe user-visible state back to green.
     private func updateSnapshot(for provider: Provider, error: String) {
-        let snapshot = ProviderSnapshot(
-            id: provider.id,
-            name: provider.name,
-            overallStatus: .unknown,
-            components: [],
-            activeIncidents: [],
-            lastUpdated: Date(),
-            error: error
-        )
+        guard providers.contains(where: { $0.id == provider.id }) else { return }
+
+        let snapshot: ProviderSnapshot
         if let idx = snapshots.firstIndex(where: { $0.id == provider.id }) {
+            let prior = snapshots[idx]
+            snapshot = ProviderSnapshot(
+                id: prior.id,
+                name: provider.name,
+                overallStatus: prior.error == nil ? prior.overallStatus : .unknown,
+                components: prior.error == nil ? prior.components : [],
+                activeIncidents: prior.error == nil ? prior.activeIncidents : [],
+                lastUpdated: prior.lastUpdated, // keep last-known-good time
+                error: error
+            )
             snapshots[idx] = snapshot
         } else {
+            snapshot = ProviderSnapshot(
+                id: provider.id,
+                name: provider.name,
+                overallStatus: .unknown,
+                components: [],
+                activeIncidents: [],
+                lastUpdated: Date(),
+                error: error
+            )
             snapshots.append(snapshot)
         }
         recalcWorstStatus()
+        onPollCycleComplete?()
     }
 
     func recalcWorstStatus() {
         let mutedIds = Set(providers.filter(\.isMuted).map(\.id))
+        // Include errored snapshots: they carry the last-good overallStatus,
+        // and `.unknown` (no prior data) has severity 1 so it surfaces above
+        // "operational" but is overridden by any real degraded/outage state.
         let newStatus = snapshots
-            .filter { $0.error == nil && !mutedIds.contains($0.id) }
+            .filter { !mutedIds.contains($0.id) }
             .map(\.overallStatus)
             .max() ?? .operational
         if newStatus != worstStatus {
             worstStatus = newStatus
             onWorstStatusChanged?(newStatus)
         }
+    }
+
+    /// Count of providers whose most recent poll failed.
+    var unreachableCount: Int {
+        snapshots.filter { $0.error != nil }.count
     }
 }

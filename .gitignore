@@ -28,3 +28,6 @@ Package.resolved
 
 # Release artifacts
 releases/
+
+# Agent working docs (audits, scratch, etc.)
+agent-docs/

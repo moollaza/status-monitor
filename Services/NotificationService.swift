@@ -11,16 +11,32 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     /// Called when user taps a notification with the provider ID for deep-linking.
     var onNotificationTapped: (@MainActor @Sendable (_ providerId: UUID?) -> Void)?
 
+    /// Cached authorization state. Refreshed after `requestPermission` and each
+    /// app foreground event. Consulted before each `notify` so we don't enqueue
+    /// requests that the system will silently drop.
+    private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
+        refreshAuthorizationStatus()
+    }
+
+    func refreshAuthorizationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            self?.authorizationStatus = settings.authorizationStatus
+        }
     }
 
     func requestPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, error in
             if let error = error {
                 logger.error("Notification permission error: \(error.localizedDescription)")
             }
+            if !granted {
+                logger.warning("User denied notification permission — outage alerts will not be delivered")
+            }
+            self?.refreshAuthorizationStatus()
         }
     }
 
@@ -28,6 +44,22 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         guard UserDefaults.standard.bool(forKey: "notificationsEnabled") else {
             logger.debug("Notification suppressed (disabled in preferences)")
             return
+        }
+
+        // If we know the user denied permission, there's no point queuing the
+        // request — log loudly so the dropped transition is still traceable.
+        switch authorizationStatus {
+        case .denied:
+            logger.warning("Not posting notification for \(provider): authorization denied")
+            return
+        case .notDetermined:
+            // Permission prompt hasn't resolved yet; the add() call will itself
+            // no-op. Fall through so the completion handler can log.
+            break
+        case .authorized, .provisional, .ephemeral:
+            break
+        @unknown default:
+            break
         }
 
         let content = UNMutableNotificationContent()
@@ -51,14 +83,20 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         // Include provider ID for deep-linking on tap
         content.userInfo = ["providerId": providerId.uuidString]
 
-        // Distinct identifier per provider so notifications stack properly
+        // Stable identifier per provider so a newer notification REPLACES the
+        // prior one for the same service (prevents flap-spam in Notification
+        // Center when a service oscillates operational↔︎degraded).
         let request = UNNotificationRequest(
-            identifier: "\(provider)-\(UUID().uuidString)",
+            identifier: "status-\(providerId.uuidString)",
             content: content,
-            trigger: nil // deliver immediately
+            trigger: nil
         )
 
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                logger.error("Failed to deliver notification for \(provider): \(error.localizedDescription)")
+            }
+        }
     }
 
     // Show notification even when app is in foreground

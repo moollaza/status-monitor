@@ -39,43 +39,42 @@ final class RSSParserTests: XCTestCase {
     </feed>
     """
 
-    private func parseRSS(_ xml: String) -> [RSSItem] {
+    private func parseRSS(_ xml: String) throws -> [RSSItem] {
         let data = xml.data(using: .utf8)!
-        return RSSStatusParser(data: data).parse()
+        return try RSSStatusParser(data: data).parse()
     }
 
     // MARK: - RSS parsing
 
-    func testParseRSSItemCount() {
-        let items = parseRSS(sampleRSS)
+    func testParseRSSItemCount() throws {
+        let items = try parseRSS(sampleRSS)
         XCTAssertEqual(items.count, 2)
     }
 
-    func testParseRSSItemTitle() {
-        let items = parseRSS(sampleRSS)
+    func testParseRSSItemTitle() throws {
+        let items = try parseRSS(sampleRSS)
         XCTAssertEqual(items[0].title, "Major outage in US-East")
     }
 
-    func testParseRSSItemDescription() {
-        let items = parseRSS(sampleRSS)
+    func testParseRSSItemDescription() throws {
+        let items = try parseRSS(sampleRSS)
         XCTAssertEqual(items[0].description, "We are investigating a major outage.")
     }
 
-    func testParseRSSItemGuid() {
-        let items = parseRSS(sampleRSS)
+    func testParseRSSItemGuid() throws {
+        let items = try parseRSS(sampleRSS)
         XCTAssertEqual(items[0].guid, "item-1")
     }
 
-    func testParseRSSItemPubDate() {
-        let items = parseRSS(sampleRSS)
+    func testParseRSSItemPubDate() throws {
+        let items = try parseRSS(sampleRSS)
         XCTAssertNotNil(items[0].pubDate, "pubDate should be parsed from RFC 822 format")
     }
 
-    func testParseRSSDateRFC822() {
-        let items = parseRSS(sampleRSS)
+    func testParseRSSDateRFC822() throws {
+        let items = try parseRSS(sampleRSS)
         let date = items[0].pubDate
         XCTAssertNotNil(date)
-        // Verify the date is roughly Jan 1, 2026
         if let date = date {
             let cal = Calendar(identifier: .gregorian)
             let components = cal.dateComponents(in: TimeZone(identifier: "UTC")!, from: date)
@@ -85,49 +84,67 @@ final class RSSParserTests: XCTestCase {
         }
     }
 
+    // MARK: - CDATA
+
+    func testParseCDATADescription() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <item>
+            <title>Incident</title>
+            <description><![CDATA[<p>We are <b>investigating</b> the issue.</p>]]></description>
+          </item>
+        </channel></rss>
+        """
+        let items = try parseRSS(xml)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertTrue(items[0].description.contains("investigating"),
+                      "Description must capture CDATA payload (the common case for status-page RSS)")
+    }
+
     // MARK: - Atom parsing
 
-    func testParseAtomEntry() {
-        let items = parseRSS(sampleAtom)
+    func testParseAtomEntry() throws {
+        let items = try parseRSS(sampleAtom)
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items[0].title, "Degraded performance on EU cluster")
     }
 
-    func testParseAtomSummary() {
-        let items = parseRSS(sampleAtom)
+    func testParseAtomSummary() throws {
+        let items = try parseRSS(sampleAtom)
         XCTAssertEqual(items[0].description, "Elevated error rates observed.")
     }
 
-    func testParseAtomId() {
-        let items = parseRSS(sampleAtom)
+    func testParseAtomId() throws {
+        let items = try parseRSS(sampleAtom)
         XCTAssertEqual(items[0].guid, "entry-1")
     }
 
-    func testParseAtomPublished() {
-        let items = parseRSS(sampleAtom)
+    func testParseAtomPublished() throws {
+        let items = try parseRSS(sampleAtom)
         XCTAssertNotNil(items[0].pubDate, "Atom <published> should be parsed as pubDate")
     }
 
     // MARK: - Edge cases
 
-    func testParseEmptyFeed() {
+    func testParseEmptyFeed() throws {
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0"><channel><title>Empty</title></channel></rss>
         """
-        let items = parseRSS(xml)
+        let items = try parseRSS(xml)
         XCTAssertTrue(items.isEmpty)
     }
 
-    func testParseInvalidXML() {
+    func testParseInvalidXMLThrows() {
         let data = "<<<not valid xml>>>".data(using: .utf8)!
-        let items = RSSStatusParser(data: data).parse()
-        XCTAssertTrue(items.isEmpty, "Invalid XML should return empty array, not crash")
+        XCTAssertThrowsError(try RSSStatusParser(data: data).parse(),
+                             "Malformed XML must surface as an error, not an empty list")
     }
 
-    func testParseEmptyData() {
-        let items = RSSStatusParser(data: Data()).parse()
-        XCTAssertTrue(items.isEmpty, "Empty data should return empty array")
+    func testParseEmptyDataThrows() {
+        XCTAssertThrowsError(try RSSStatusParser(data: Data()).parse(),
+                             "Empty data must surface as an error")
     }
 
     // MARK: - RSS status heuristic (via StatusManager.rssStatusHeuristic)
@@ -159,6 +176,20 @@ final class RSSParserTests: XCTestCase {
 
     func testHeuristicResolved() {
         let status = StatusManager.rssStatusHeuristic(title: "Resolved: API latency", description: "")
+        XCTAssertEqual(status, .operational)
+    }
+
+    func testHeuristicResolvedPrecedesMajor() {
+        // Regression: "Resolved: Major outage ..." is the most common
+        // post-incident message on status feeds. The old heuristic matched
+        // "major" first, flagging an active outage for a healed incident.
+        let status = StatusManager.rssStatusHeuristic(title: "Resolved: Major outage in us-east", description: "")
+        XCTAssertEqual(status, .operational,
+                       "'Resolved' must beat 'major' — resolution messages are not active outages")
+    }
+
+    func testHeuristicCompletedPrecedesOutage() {
+        let status = StatusManager.rssStatusHeuristic(title: "Completed: Partial outage maintenance", description: "")
         XCTAssertEqual(status, .operational)
     }
 

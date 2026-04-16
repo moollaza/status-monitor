@@ -27,9 +27,26 @@ struct DashboardView: View {
         return result
     }
 
-    /// True when the app has no connectivity (all snapshots are errors)
+    /// True when every monitored service is unreachable — suggests no connectivity.
     private var isOffline: Bool {
         !manager.snapshots.isEmpty && manager.snapshots.allSatisfy { $0.error != nil }
+    }
+
+    private var mutedIds: Set<UUID> {
+        Set(manager.providers.filter(\.isMuted).map(\.id))
+    }
+
+    /// Providers the user is actively expecting alerts for: not muted, regardless of error state.
+    private var visibleSnapshots: [ProviderSnapshot] {
+        manager.snapshots.filter { !mutedIds.contains($0.id) }
+    }
+
+    private var issueCount: Int {
+        visibleSnapshots.filter { $0.overallStatus != .operational }.count
+    }
+
+    private var unreachableCount: Int {
+        visibleSnapshots.filter { $0.error != nil }.count
     }
 
     private var sortedSnapshots: [ProviderSnapshot] {
@@ -60,7 +77,7 @@ struct DashboardView: View {
                 ServiceDetailView(
                     snapshot: snapshot,
                     catalogId: provider?.catalogEntryId,
-                    statusPageURL: provider.flatMap { URL(string: $0.baseURL) },
+                    statusPageURL: provider?.externalURL,
                     onBack: {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             selectedProviderId = nil
@@ -197,9 +214,9 @@ struct DashboardView: View {
                     Circle()
                         .fill(Color(nsColor: manager.worstStatus.color))
                         .frame(width: 8, height: 8)
-                    let issueCount = manager.snapshots.filter { $0.error == nil && $0.overallStatus != .operational }.count
                     if issueCount > 0 {
-                        Text("\(issueCount) issue\(issueCount == 1 ? "" : "s")")
+                        let summary = issueSummary(issues: issueCount, unreachable: unreachableCount)
+                        Text(summary)
                             .font(.caption)
                             .foregroundStyle(Color(nsColor: manager.worstStatus.textColor))
                     } else {
@@ -231,7 +248,7 @@ struct DashboardView: View {
                         snapshot: snapshot,
                         catalogId: provider?.catalogEntryId,
                         isMuted: provider?.isMuted ?? false,
-                        statusPageURL: provider?.baseURL,
+                        statusPageURL: provider?.externalURL?.absoluteString,
                         onTap: {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 selectedProviderId = snapshot.id
@@ -245,6 +262,16 @@ struct DashboardView: View {
             }
             .padding(.vertical, 2)
         }
+    }
+
+    private func issueSummary(issues: Int, unreachable: Int) -> String {
+        if unreachable == 0 {
+            return "\(issues) issue\(issues == 1 ? "" : "s")"
+        }
+        if unreachable == issues {
+            return "\(unreachable) unreachable"
+        }
+        return "\(issues) issue\(issues == 1 ? "" : "s") (\(unreachable) unreachable)"
     }
 
     // MARK: - Empty State

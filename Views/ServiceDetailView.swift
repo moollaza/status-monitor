@@ -64,7 +64,7 @@ struct ServiceDetailView: View {
 
                     Spacer()
 
-                    if let url = statusPageURL {
+                    if let url = statusPageURL, url.scheme?.lowercased() == "https" {
                         Button {
                             NSWorkspace.shared.open(url)
                         } label: {
