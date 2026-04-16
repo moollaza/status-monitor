@@ -3,6 +3,13 @@ import OSLog
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "ui")
 
+extension Notification.Name {
+    static let deepLinkToProvider = Notification.Name("DeepLinkToProvider")
+    #if DEBUG
+    static let simulateStatus = Notification.Name("SimulateStatus")
+    #endif
+}
+
 enum DashboardSort: String {
     case severity, alphabetical
 }
@@ -91,7 +98,7 @@ struct DashboardView: View {
         }
         .frame(width: 420, height: 520)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onReceive(NotificationCenter.default.publisher(for: .init("DeepLinkToProvider"))) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: .deepLinkToProvider)) { notification in
             if let id = notification.userInfo?["providerId"] as? UUID {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     selectedProviderId = id
@@ -238,11 +245,18 @@ struct DashboardView: View {
 
     // MARK: - Service List
 
+    /// Built once per body invocation; cuts the per-row provider lookup from
+    /// O(providers) to O(1). At 50+ providers the quadratic cost is visible.
+    private var providersById: [UUID: Provider] {
+        Dictionary(uniqueKeysWithValues: manager.providers.map { ($0.id, $0) })
+    }
+
     private var serviceList: some View {
-        ScrollView {
-            VStack(spacing: 0) {
+        let lookup = providersById
+        return ScrollView {
+            LazyVStack(spacing: 0) {
                 ForEach(sortedSnapshots) { snapshot in
-                    let provider = manager.providers.first(where: { $0.id == snapshot.id })
+                    let provider = lookup[snapshot.id]
                     ProviderRowView(
                         snapshot: snapshot,
                         catalogId: provider?.catalogEntryId,
@@ -392,15 +406,15 @@ struct ProviderRowView: View {
             Divider()
             Button("Simulate Degraded") {
                 // Dev mode: mutate snapshot status in memory
-                NotificationCenter.default.post(name: .init("SimulateStatus"), object: nil,
+                NotificationCenter.default.post(name: .simulateStatus, object: nil,
                     userInfo: ["id": snapshot.id, "status": ComponentStatus.degradedPerformance])
             }
             Button("Simulate Major Outage") {
-                NotificationCenter.default.post(name: .init("SimulateStatus"), object: nil,
+                NotificationCenter.default.post(name: .simulateStatus, object: nil,
                     userInfo: ["id": snapshot.id, "status": ComponentStatus.majorOutage])
             }
             Button("Reset to Operational") {
-                NotificationCenter.default.post(name: .init("SimulateStatus"), object: nil,
+                NotificationCenter.default.post(name: .simulateStatus, object: nil,
                     userInfo: ["id": snapshot.id, "status": ComponentStatus.operational])
             }
             #endif

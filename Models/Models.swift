@@ -220,8 +220,6 @@ struct Provider: Identifiable, Codable, Equatable {
         guard hasValidURL, let url = URL(string: baseURL) else { return nil }
         return url
     }
-
-    static let defaults: [Provider] = []
 }
 
 enum ProviderType: String, Codable, CaseIterable {

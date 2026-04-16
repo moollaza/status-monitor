@@ -199,10 +199,4 @@ final class ProviderTests: XCTestCase {
         XCTAssertEqual(p1, p1)
     }
 
-    // MARK: - Defaults
-
-    func testDefaultsIsEmpty() {
-        XCTAssertTrue(Provider.defaults.isEmpty,
-                      "Provider.defaults should be empty; onboarding handles initial selection")
-    }
 }

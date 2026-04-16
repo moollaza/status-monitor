@@ -5,8 +5,8 @@ struct ServiceIconView: View {
     let catalogId: String?
 
     var body: some View {
-        if let catalogId, NSImage(named: catalogId) != nil {
-            Image(nsImage: NSImage(named: catalogId)!)
+        if let catalogId, let icon = NSImage(named: catalogId) {
+            Image(nsImage: icon)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 20, height: 20)
