@@ -40,6 +40,33 @@ Build and run the `StatusMonitor` scheme in Xcode.
 xcodebuild -project StatusMonitor.xcodeproj -scheme StatusMonitor -configuration Release build
 ```
 
+## Releasing
+
+One-time setup — store your Apple notarization credentials in the macOS Keychain:
+
+```bash
+xcrun notarytool store-credentials AC_PASSWORD \
+    --apple-id you@example.com \
+    --team-id W4HBM3A7DC \
+    --password <app-specific-password>
+```
+
+Generate the app-specific password at [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords. The credentials live in your Keychain; `AC_PASSWORD` is just a profile name the release script references.
+
+Build a signed, notarized, stapled DMG:
+
+```bash
+scripts/release.sh
+```
+
+Output: `build/release/StatusMonitor-<version>.dmg`.
+
+For a local smoke test without hitting Apple's notary service:
+
+```bash
+scripts/release.sh --skip-notarize
+```
+
 ## Tech Stack
 
 - Swift 5.9+, SwiftUI

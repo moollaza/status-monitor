@@ -69,14 +69,17 @@ final class StatusManagerTests: XCTestCase {
         XCTAssertEqual(manager.worstStatus, .majorOutage)
     }
 
-    func testWorstStatusExcludesErrors() {
+    func testWorstStatusPreservesLastGoodAcrossError() {
+        // When a poll fails mid-incident, the snapshot retains its last-good
+        // overallStatus with error != nil. worstStatus must still include it
+        // so the menu bar doesn't revert to green during a transient failure.
         manager.snapshots = [
             makeSnapshot(status: .operational),
             makeSnapshot(status: .majorOutage, error: "Network error"),
         ]
         manager.recalcWorstStatus()
-        XCTAssertEqual(manager.worstStatus, .operational,
-                       "Snapshots with errors should be excluded from worst calculation")
+        XCTAssertEqual(manager.worstStatus, .majorOutage,
+                       "Error snapshots carry their last-good status and must contribute to worstStatus")
     }
 
     func testWorstStatusAllErrors() {
@@ -85,8 +88,8 @@ final class StatusManagerTests: XCTestCase {
             makeSnapshot(status: .partialOutage, error: "Error 2"),
         ]
         manager.recalcWorstStatus()
-        XCTAssertEqual(manager.worstStatus, .operational,
-                       "When all snapshots have errors, worst status defaults to operational")
+        XCTAssertEqual(manager.worstStatus, .majorOutage,
+                       "Error snapshots retain their last-good status; max wins")
     }
 
     func testWorstStatusMixedWithErrors() {
@@ -96,18 +99,50 @@ final class StatusManagerTests: XCTestCase {
             makeSnapshot(status: .majorOutage, error: "Network error"),
         ]
         manager.recalcWorstStatus()
-        XCTAssertEqual(manager.worstStatus, .degradedPerformance,
-                       "Error snapshots should be ignored; worst healthy status is degraded")
+        XCTAssertEqual(manager.worstStatus, .majorOutage,
+                       "Error snapshots contribute to worst status; outage beats degraded")
     }
 
-    func testWorstStatusUnknownExcludedFromMax() {
-        // .unknown has severity -1, so .operational should win via max()
+    func testWorstStatusUnknownSurfaces() {
+        // .unknown now elevates above .operational so monitoring-degraded
+        // state is visible instead of masquerading as healthy.
         manager.snapshots = [
             makeSnapshot(status: .unknown),
             makeSnapshot(status: .operational),
         ]
         manager.recalcWorstStatus()
-        XCTAssertEqual(manager.worstStatus, .operational)
+        XCTAssertEqual(manager.worstStatus, .unknown,
+                       "Unknown must surface above operational")
+    }
+
+    func testWorstStatusUnknownBeatenByRealProblem() {
+        manager.snapshots = [
+            makeSnapshot(status: .unknown),
+            makeSnapshot(status: .degradedPerformance),
+        ]
+        manager.recalcWorstStatus()
+        XCTAssertEqual(manager.worstStatus, .degradedPerformance,
+                       "A real degraded signal must override an unknown one")
+    }
+
+    func testUnreachableCountCountsErrorSnapshots() {
+        manager.snapshots = [
+            makeSnapshot(status: .operational),
+            makeSnapshot(status: .majorOutage, error: "Network error"),
+            makeSnapshot(status: .operational, error: "Timeout"),
+        ]
+        XCTAssertEqual(manager.unreachableCount, 2)
+    }
+
+    // MARK: - Refresh coalescing
+
+    func testPollAllCoalescesWhenAlreadyRefreshing() {
+        // Simulate an in-flight refresh. A second call must no-op rather than
+        // spawn an overlapping task group.
+        manager.isRefreshing = true
+        manager.pollAll()
+        XCTAssertTrue(manager.isRefreshing,
+                      "Second pollAll must not reset the flag nor start a new cycle")
     }
 
     // MARK: - Muted providers

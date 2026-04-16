@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Export method for outside-the-App-Store distribution. -->
+    <key>method</key>
+    <string>developer-id</string>
+
+    <key>teamID</key>
+    <string>W4HBM3A7DC</string>
+
+    <!-- Rely on the team's Developer ID Application certificate. -->
+    <key>signingStyle</key>
+    <string>automatic</string>
+
+    <!-- Notarize as part of the export step — requires a Keychain profile
+         named "AC_PASSWORD" created via `xcrun notarytool store-credentials`. -->
+    <key>destination</key>
+    <string>export</string>
+</dict>
+</plist>

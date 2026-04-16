@@ -1,8 +1,13 @@
 import Foundation
 import Observation
 import OSLog
+import AppKit
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "polling")
+
+/// Maximum allowed response size in bytes. Guards against hostile or broken
+/// servers that return multi-GB blobs (or gzip bombs) from a status endpoint.
+private let maxResponseBytes = 5_000_000
 
 @MainActor
 @Observable
@@ -11,6 +16,9 @@ class StatusManager {
     var providers: [Provider] = []
     var worstStatus: ComponentStatus = .operational
     var isPolling = false
+    /// True while a manual pollAll() cycle is in flight. UI can bind to this
+    /// to show/hide a spinner tied to actual completion rather than a timer.
+    var isRefreshing = false
 
     var onWorstStatusChanged: ((ComponentStatus) -> Void)?
     var onPollCycleComplete: (() -> Void)?
@@ -18,11 +26,32 @@ class StatusManager {
     private var previousStatuses: [UUID: ComponentStatus] = [:]
     private var failureCounts: [UUID: Int] = [:]
     private var lastFailure: [UUID: Date] = [:]
+    /// Timestamps of status transitions per provider. Used to surface a
+    /// "Nth change in the last hour" note in notifications when a service
+    /// is flapping, since we coalesce notifications to one per provider in
+    /// Notification Center.
+    private var transitionTimes: [UUID: [Date]] = [:]
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
+    let session: URLSession
+    let notifier: NotificationServicing
+    let defaults: UserDefaults
+    /// Injectable clock so tests can drive backoff deterministically.
+    let now: () -> Date
+
+    static let defaultSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral   // no shared cookies / cache
+        config.timeoutIntervalForRequest = 15            // per-chunk timeout
+        config.timeoutIntervalForResource = 30           // total-request timeout (was 7 days default)
         config.waitsForConnectivity = true
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.httpCookieStorage = nil
+        config.urlCache = nil
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        config.httpAdditionalHeaders = [
+            "User-Agent": "StatusMonitor/\(version) (+https://github.com/moollaza/status-monitor)"
+        ]
         return URLSession(configuration: config)
     }()
 
@@ -38,46 +67,110 @@ class StatusManager {
         return f
     }()
 
-    init() {
+    init(
+        session: URLSession = StatusManager.defaultSession,
+        notifier: NotificationServicing = NotificationService.shared,
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.session = session
+        self.notifier = notifier
+        self.defaults = defaults
+        self.now = now
         loadProviders()
+        observeSleepWake()
+    }
+
+    /// On sleep: invalidate timers so they don't fire wildly on wake.
+    /// On wake: reschedule and pollAll so any transitions we missed while
+    /// asleep are observed and notified. Without this, an outage that starts
+    /// and ends entirely during sleep goes undetected.
+    private func observeSleepWake() {
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObserver = nc.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isPolling else { return }
+                logger.info("System sleeping — pausing polls")
+                self.timers.values.forEach { $0.invalidate() }
+                self.timers.removeAll()
+            }
+        }
+        wakeObserver = nc.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isPolling else { return }
+                logger.info("System woke — resuming polls")
+                for provider in self.providers where provider.isEnabled {
+                    self.schedulePolling(for: provider)
+                }
+                self.pollAll(force: true)
+            }
+        }
     }
 
     // MARK: - Provider Persistence
 
     func loadProviders() {
-        if let data = UserDefaults.standard.data(forKey: "providers"),
-           let saved = try? JSONDecoder().decode([Provider].self, from: data),
-           !saved.isEmpty {
-            providers = saved
-            // Migration: existing users who haven't seen onboarding
-            if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-                UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-            }
-        } else if UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-            // User completed onboarding but removed all providers
+        guard let data = defaults.data(forKey: "providers") else {
             providers = []
-        } else {
-            // First launch — onboarding will handle provider selection
+            return
+        }
+        do {
+            let saved = try JSONDecoder().decode([Provider].self, from: data)
+            if !saved.isEmpty {
+                providers = saved
+                if !defaults.bool(forKey: "hasCompletedOnboarding") {
+                    defaults.set(true, forKey: "hasCompletedOnboarding")
+                }
+            } else {
+                providers = []
+            }
+        } catch {
+            // Schema mismatch or corruption — back up the bad blob so it can be
+            // recovered manually, then start fresh rather than silently empty.
+            let backupKey = "providers_corrupt_\(Int(Date().timeIntervalSince1970))"
+            defaults.set(data, forKey: backupKey)
+            logger.error("Failed to decode persisted providers (\(error.localizedDescription)). Backed up raw data at \(backupKey).")
             providers = []
         }
     }
 
     func saveProviders() {
-        if let data = try? JSONEncoder().encode(providers) {
-            UserDefaults.standard.set(data, forKey: "providers")
+        do {
+            let data = try JSONEncoder().encode(providers)
+            defaults.set(data, forKey: "providers")
+        } catch {
+            logger.error("Failed to encode providers for persistence: \(error.localizedDescription)")
         }
     }
 
-    func addProvider(_ provider: Provider) {
+    @discardableResult
+    func addProvider(_ provider: Provider) -> Bool {
+        guard provider.hasValidURL else {
+            logger.error("Refused to add provider with invalid URL: \(provider.baseURL)")
+            return false
+        }
+        guard !providers.contains(where: { $0.baseURL == provider.baseURL }) else {
+            logger.warning("Refused to add duplicate provider: \(provider.baseURL)")
+            return false
+        }
         providers.append(provider)
         saveProviders()
         schedulePolling(for: provider)
         Task { await poll(provider: provider) }
         // Mark onboarding complete when first provider is added
-        if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        if !defaults.bool(forKey: "hasCompletedOnboarding") {
+            defaults.set(true, forKey: "hasCompletedOnboarding")
         }
         logger.info("Added provider: \(provider.name)")
+        return true
     }
 
     func updatePollInterval(for provider: Provider, seconds: Int) {
@@ -102,6 +195,9 @@ class StatusManager {
         providers.removeAll { $0.id == provider.id }
         snapshots.removeAll { $0.id == provider.id }
         previousStatuses.removeValue(forKey: provider.id)
+        failureCounts.removeValue(forKey: provider.id)
+        lastFailure.removeValue(forKey: provider.id)
+        transitionTimes.removeValue(forKey: provider.id)
         saveProviders()
         recalcWorstStatus()
     }
@@ -139,18 +235,33 @@ class StatusManager {
     }
 
     private func schedulePolling(for provider: Provider) {
-        timers[provider.id]?.invalidate()
+        let providerId = provider.id
+        timers[providerId]?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(provider.pollIntervalSeconds), repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.poll(provider: provider)
+                // Look up the current provider by ID so mute/name/URL edits take effect
+                // without waiting for a re-schedule.
+                guard let self = self,
+                      let current = self.providers.first(where: { $0.id == providerId }) else { return }
+                await self.poll(provider: current)
             }
         }
-        timers[provider.id] = timer
+        timers[providerId] = timer
     }
 
     private let maxConcurrentPolls = 6
 
-    func pollAll() {
+    /// Manually refresh every enabled provider. Coalesces concurrent invocations
+    /// via `isRefreshing` so rapid Cmd+R / button clicks don't spawn overlapping
+    /// task groups. `force: true` bypasses the per-provider backoff window so
+    /// a user-initiated refresh always tries, even for recently-failed
+    /// providers.
+    func pollAll(force: Bool = true) {
+        guard !isRefreshing else {
+            logger.debug("pollAll dropped: refresh already in flight")
+            return
+        }
+        isRefreshing = true
         let enabled = providers.filter(\.isEnabled)
         Task {
             await withTaskGroup(of: Void.self) { group in
@@ -161,35 +272,56 @@ class StatusManager {
                         running -= 1
                     }
                     group.addTask { @MainActor [weak self] in
-                        await self?.poll(provider: provider)
+                        await self?.poll(provider: provider, force: force)
                     }
                     running += 1
                 }
             }
+            isRefreshing = false
             onPollCycleComplete?()
         }
     }
 
-    private func poll(provider: Provider) async {
-        // Exponential backoff: skip if we failed recently
-        if let failures = failureCounts[provider.id], failures > 0,
+    // Internal (not private) so tests can drive the full pipeline end-to-end
+    // against an injected URLSession. Not public; still hidden outside the module.
+    func poll(provider: Provider, force: Bool = false) async {
+        // Exponential backoff: skip if we failed recently, unless the caller
+        // is forcing (user-initiated refresh bypasses backoff).
+        // `max(0, ...)` guards against wall-clock rollback (NTP/timezone) that
+        // would otherwise leave the gate permanently closed.
+        if !force,
+           let failures = failureCounts[provider.id], failures > 0,
            let lastFail = lastFailure[provider.id] {
-            let backoffSeconds = min(Double(provider.pollIntervalSeconds) * pow(2, Double(min(failures, 5))), 3600)
-            if Date().timeIntervalSince(lastFail) < backoffSeconds {
-                return // still in backoff window
+            let backoffSeconds = backoffWindow(for: provider, failures: failures)
+            let elapsed = max(0, now().timeIntervalSince(lastFail))
+            if elapsed < backoffSeconds {
+                return
             }
         }
 
         guard let url = provider.apiURL else {
-            updateSnapshot(for: provider, error: "Invalid URL")
+            recordFailure(for: provider)
+            updateSnapshot(for: provider, error: "Invalid URL — must be https:// with a valid host")
             return
         }
 
         do {
             let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
                 recordFailure(for: provider)
-                updateSnapshot(for: provider, error: "Unable to reach status page")
+                updateSnapshot(for: provider, error: "Non-HTTP response")
+                return
+            }
+            guard (200...299).contains(http.statusCode) else {
+                logger.error("Poll HTTP \(http.statusCode) for \(provider.name)")
+                recordFailure(for: provider)
+                updateSnapshot(for: provider, error: httpErrorMessage(for: http.statusCode))
+                return
+            }
+            guard data.count <= maxResponseBytes else {
+                logger.error("Poll response too large for \(provider.name): \(data.count) bytes")
+                recordFailure(for: provider)
+                updateSnapshot(for: provider, error: "Response too large (\(data.count / 1_000_000) MB)")
                 return
             }
 
@@ -198,10 +330,24 @@ class StatusManager {
 
             switch provider.type {
             case .statuspage:
-                try parseStatuspage(data: data, provider: provider)
+                do {
+                    try parseStatuspage(data: data, provider: provider)
+                } catch let error as DecodingError {
+                    logger.error("Statuspage schema mismatch for \(provider.name): \(String(describing: error))")
+                    updateSnapshot(for: provider, error: "Status format not recognized")
+                }
             case .rss:
-                try parseRSS(data: data, provider: provider)
+                do {
+                    try parseRSS(data: data, provider: provider)
+                } catch {
+                    logger.error("RSS parse failed for \(provider.name): \(error.localizedDescription)")
+                    updateSnapshot(for: provider, error: "Could not parse RSS feed")
+                }
             }
+        } catch let urlError as URLError {
+            logger.error("Network error [\(urlError.code.rawValue)] for \(provider.name): \(urlError.localizedDescription)")
+            recordFailure(for: provider)
+            updateSnapshot(for: provider, error: networkErrorMessage(for: urlError))
         } catch {
             logger.error("Poll failed for \(provider.name): \(error.localizedDescription)")
             recordFailure(for: provider)
@@ -209,10 +355,39 @@ class StatusManager {
         }
     }
 
+    private func backoffWindow(for provider: Provider, failures: Int) -> Double {
+        let base = min(Double(provider.pollIntervalSeconds) * pow(2, Double(min(failures, 5))), 3600)
+        // Jitter in ±50% so many providers failing together don't retry in lockstep.
+        return base * Double.random(in: 0.5...1.5)
+    }
+
+    private func httpErrorMessage(for code: Int) -> String {
+        switch code {
+        case 401, 403: return "Access denied (\(code))"
+        case 404: return "Status page not found (404) — URL may have changed"
+        case 429: return "Rate limited (429)"
+        case 500...599: return "Status page unavailable (\(code))"
+        case 300...399: return "Unexpected redirect (\(code))"
+        default: return "HTTP \(code)"
+        }
+    }
+
+    private func networkErrorMessage(for error: URLError) -> String {
+        switch error.code {
+        case .notConnectedToInternet: return "No internet connection"
+        case .timedOut: return "Request timed out"
+        case .cannotFindHost, .dnsLookupFailed: return "Cannot find host"
+        case .cannotConnectToHost: return "Cannot connect to host"
+        case .secureConnectionFailed, .serverCertificateUntrusted:
+            return "Secure connection failed"
+        default: return "Network error"
+        }
+    }
+
     private func recordFailure(for provider: Provider) {
         let count = (failureCounts[provider.id] ?? 0) + 1
         failureCounts[provider.id] = count
-        lastFailure[provider.id] = Date()
+        lastFailure[provider.id] = now()
         let backoff = min(Double(provider.pollIntervalSeconds) * pow(2, Double(min(count, 5))), 3600)
         logger.warning("Poll failure #\(count) for \(provider.name), backing off \(Int(backoff))s")
     }
@@ -227,7 +402,7 @@ class StatusManager {
         let decoder = JSONDecoder()
         let summary = try decoder.decode(StatuspageSummary.self, from: data)
 
-        let overall = ComponentStatus(fromIndicator: summary.status.indicator)
+        let indicatorStatus = ComponentStatus(fromIndicator: summary.status.indicator)
 
         // Build group name lookup for child components (e.g., Asana has US, EU, Japan groups)
         var groupNames: [String: String] = [:]
@@ -238,7 +413,7 @@ class StatusManager {
         }
 
         let components = summary.components
-            .filter { $0.group != true }  // exclude group headers, keep children
+            .filter { $0.group != true }
             .map { comp -> ComponentSnapshot in
                 var displayName = comp.name
                 if let groupId = comp.groupId, let groupName = groupNames[groupId] {
@@ -246,13 +421,27 @@ class StatusManager {
                 }
                 return ComponentSnapshot(id: comp.id, name: displayName, status: ComponentStatus(fromStatuspage: comp.status))
             }
-        let incidents = (summary.incidents ?? []).prefix(5).map { incident in
+
+        // Overall status is the worst of the Atlassian indicator and any
+        // component-level status — indicators sometimes lag behind components
+        // during rapid incidents.
+        let componentMax = components.map(\.status).max() ?? .operational
+        let overall = max(indicatorStatus, componentMax)
+
+        // Merge in-progress scheduled maintenances into active incidents so
+        // the UI reflects ongoing maintenance windows. Atlassian reports
+        // these in `scheduled_maintenances` with `status: "in_progress"`,
+        // not in `incidents`.
+        let inProgressMaint = (summary.scheduledMaintenances ?? []).filter { $0.status == "in_progress" }
+        let combinedIncidents = ((summary.incidents ?? []) + inProgressMaint).prefix(5)
+
+        let incidents = combinedIncidents.map { incident -> IncidentSnapshot in
             let updates = (incident.incidentUpdates ?? []).map { update in
                 IncidentUpdateSnapshot(
                     id: update.id,
                     status: update.status,
-                    body: update.body,
-                    createdAt: Self.parseDate(update.createdAt)
+                    body: update.body ?? "",
+                    createdAt: update.createdAt.flatMap(Self.parseDate)
                 )
             }
             return IncidentSnapshot(
@@ -275,7 +464,6 @@ class StatusManager {
             lastUpdated: Date(),
             error: nil
         )
-
         applySnapshot(snapshot, for: provider)
     }
 
@@ -283,21 +471,27 @@ class StatusManager {
 
     static func rssStatusHeuristic(title: String, description: String) -> ComponentStatus {
         let text = (title + " " + description).lowercased()
+        // Resolved-first: "Resolved: Major outage" describes a healed incident, not an active one.
+        if text.contains("resolved") || text.contains("completed") || text.contains("closed") {
+            return .operational
+        }
         if text.contains("major") || text.contains("outage") { return .majorOutage }
         if text.contains("partial") { return .partialOutage }
         if text.contains("degraded") || text.contains("elevated") { return .degradedPerformance }
-        if text.contains("resolved") || text.contains("operational") { return .operational }
+        if text.contains("operational") { return .operational }
         return .unknown
     }
 
     private func parseRSS(data: Data, provider: Provider) throws {
         let parser = RSSStatusParser(data: data)
-        let items = parser.parse()
+        let items = try parser.parse()
 
-        // Heuristic: check titles/descriptions for outage keywords
+        // Heuristic: check titles/descriptions for outage keywords.
+        // Empty feed → operational (no recent items on a status-page feed
+        // typically means no incidents).
         let overall: ComponentStatus = items.first.map { item in
             Self.rssStatusHeuristic(title: item.title, description: item.description)
-        } ?? .unknown
+        } ?? .operational
 
         let incidents = items.prefix(5).map { item -> IncidentSnapshot in
             let itemStatus = Self.rssStatusHeuristic(title: item.title, description: item.description)
@@ -320,13 +514,16 @@ class StatusManager {
             lastUpdated: Date(),
             error: nil
         )
-
         applySnapshot(snapshot, for: provider)
     }
 
     // MARK: - Snapshot Management
 
     private func applySnapshot(_ snapshot: ProviderSnapshot, for provider: Provider) {
+        // Guard against races: the provider may have been removed while this
+        // poll was in flight, and its mute state may have been toggled.
+        guard let current = providers.first(where: { $0.id == provider.id }) else { return }
+
         let previousStatus = previousStatuses[provider.id]
 
         if let idx = snapshots.firstIndex(where: { $0.id == provider.id }) {
@@ -335,48 +532,89 @@ class StatusManager {
             snapshots.append(snapshot)
         }
 
-        // Notify on status change (not on first poll, skip if muted)
-        if !provider.isMuted, let prev = previousStatus, prev != snapshot.overallStatus {
-            NotificationService.shared.notify(
-                providerId: provider.id,
-                provider: provider.name,
+        // Notify on status change (not on first poll, skip if muted).
+        // Read mute from the current provider, not the captured one.
+        if !current.isMuted, let prev = previousStatus, prev != snapshot.overallStatus {
+            let changeCount = recordTransition(for: provider.id)
+            notifier.notify(
+                providerId: current.id,
+                provider: current.name,
                 from: prev,
                 to: snapshot.overallStatus,
-                incident: snapshot.activeIncidents.first?.name
+                incident: snapshot.activeIncidents.first?.name,
+                recentChangeCount: changeCount
             )
         }
 
         previousStatuses[provider.id] = snapshot.overallStatus
         recalcWorstStatus()
+        onPollCycleComplete?()
     }
 
+    /// Appends a transition timestamp for `id`, drops entries older than 1
+    /// hour, and returns the count within that window. Caller uses this to
+    /// annotate the notification body so flap frequency is visible to the
+    /// user even though Notification Center coalesces on identifier.
+    private func recordTransition(for id: UUID) -> Int {
+        let cutoff = now().addingTimeInterval(-3600)
+        var times = (transitionTimes[id] ?? []).filter { $0 >= cutoff }
+        times.append(now())
+        transitionTimes[id] = times
+        return times.count
+    }
+
+    /// Marks a provider's snapshot as errored while preserving the last-good
+    /// status/components/incidents. This way a transient parse or network
+    /// failure mid-incident doesn't wipe user-visible state back to green.
     private func updateSnapshot(for provider: Provider, error: String) {
-        let snapshot = ProviderSnapshot(
-            id: provider.id,
-            name: provider.name,
-            overallStatus: .unknown,
-            components: [],
-            activeIncidents: [],
-            lastUpdated: Date(),
-            error: error
-        )
+        guard providers.contains(where: { $0.id == provider.id }) else { return }
+
+        let snapshot: ProviderSnapshot
         if let idx = snapshots.firstIndex(where: { $0.id == provider.id }) {
+            let prior = snapshots[idx]
+            snapshot = ProviderSnapshot(
+                id: prior.id,
+                name: provider.name,
+                overallStatus: prior.error == nil ? prior.overallStatus : .unknown,
+                components: prior.error == nil ? prior.components : [],
+                activeIncidents: prior.error == nil ? prior.activeIncidents : [],
+                lastUpdated: prior.lastUpdated, // keep last-known-good time
+                error: error
+            )
             snapshots[idx] = snapshot
         } else {
+            snapshot = ProviderSnapshot(
+                id: provider.id,
+                name: provider.name,
+                overallStatus: .unknown,
+                components: [],
+                activeIncidents: [],
+                lastUpdated: Date(),
+                error: error
+            )
             snapshots.append(snapshot)
         }
         recalcWorstStatus()
+        onPollCycleComplete?()
     }
 
     func recalcWorstStatus() {
         let mutedIds = Set(providers.filter(\.isMuted).map(\.id))
+        // Include errored snapshots: they carry the last-good overallStatus,
+        // and `.unknown` (no prior data) has severity 1 so it surfaces above
+        // "operational" but is overridden by any real degraded/outage state.
         let newStatus = snapshots
-            .filter { $0.error == nil && !mutedIds.contains($0.id) }
+            .filter { !mutedIds.contains($0.id) }
             .map(\.overallStatus)
             .max() ?? .operational
         if newStatus != worstStatus {
             worstStatus = newStatus
             onWorstStatusChanged?(newStatus)
         }
+    }
+
+    /// Count of providers whose most recent poll failed.
+    var unreachableCount: Int {
+        snapshots.filter { $0.error != nil }.count
     }
 }

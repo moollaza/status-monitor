@@ -131,7 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if let providerId {
                 NotificationCenter.default.post(
-                    name: .init("DeepLinkToProvider"),
+                    name: .deepLinkToProvider,
                     object: nil,
                     userInfo: ["providerId": providerId]
                 )
@@ -158,7 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         #if DEBUG
-        NotificationCenter.default.addObserver(forName: .init("SimulateStatus"), object: nil, queue: .main) { [weak self] notification in
+        NotificationCenter.default.addObserver(forName: .simulateStatus, object: nil, queue: .main) { [weak self] notification in
             guard let id = notification.userInfo?["id"] as? UUID,
                   let status = notification.userInfo?["status"] as? ComponentStatus,
                   let self = self else { return }
@@ -208,13 +208,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings Window
 
-    func openSettings() {
-        if let window = settingsWindow, window.isVisible {
+    func openSettings(tab: SettingsTab = .services) {
+        // Reuse the existing window regardless of visibility so tab selection
+        // and other state persist across close/reopen. With
+        // `isReleasedWhenClosed = false` the window lives as long as
+        // settingsWindow retains it.
+        if let window = settingsWindow {
+            SettingsInitialTab.value = tab
+            NotificationCenter.default.post(name: .settingsTabRequested, object: nil, userInfo: ["tab": tab])
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
+        SettingsInitialTab.value = tab
         let settingsView = SettingsView()
             .environment(statusManager)
 
@@ -342,8 +349,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openFeedbackAction() {
-        openSettings()
-        // TODO: Navigate to Feedback tab
+        openSettings(tab: .feedback)
     }
 
     @objc private func quitApp() {

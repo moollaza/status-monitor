@@ -28,3 +28,10 @@ Package.resolved
 
 # Release artifacts
 releases/
+
+# Secrets (in case anyone ever uses .env for API keys/passwords)
+.env
+.env.local
+
+# Agent working docs (audits, scratch, etc.)
+agent-docs/
