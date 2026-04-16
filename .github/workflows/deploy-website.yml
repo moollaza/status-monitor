@@ -2,7 +2,7 @@ name: Deploy Website to GitHub Pages
 
 on:
   push:
-    branches: ["main", "fix/v1-bugs-and-foundation"]
+    branches: ["main"]
     paths: ["website/**"]
   workflow_dispatch:
 
