@@ -33,9 +33,22 @@ enum SettingsTab: String, CaseIterable {
     }
 }
 
+/// Shared store for the tab that should be selected when `SettingsView`
+/// appears. Written by `AppDelegate.openSettings(tab:)` before opening or
+/// fronting the window. The view reads it on appear and on `tabRequested`
+/// notification so that right-click menu actions can target a specific tab
+/// even when the settings window was already open.
+enum SettingsInitialTab {
+    static var value: SettingsTab = .services
+}
+
+extension Notification.Name {
+    static let settingsTabRequested = Notification.Name("SettingsTabRequested")
+}
+
 struct SettingsView: View {
     @Environment(StatusManager.self) var manager
-    @State private var selectedTab: SettingsTab = .services
+    @State private var selectedTab: SettingsTab = SettingsInitialTab.value
 
     var body: some View {
         NavigationSplitView {
@@ -64,6 +77,14 @@ struct SettingsView: View {
             .frame(minWidth: 450, minHeight: 400)
         }
         .frame(width: 680, height: 480)
+        .onAppear {
+            selectedTab = SettingsInitialTab.value
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .settingsTabRequested)) { note in
+            if let tab = note.userInfo?["tab"] as? SettingsTab {
+                selectedTab = tab
+            }
+        }
     }
 }
 
@@ -209,6 +230,28 @@ struct AddCustomServiceView: View {
     @State private var url = ""
     @State private var type: ProviderType = .statuspage
 
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedURL: String { url.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var candidate: Provider {
+        Provider(name: trimmedName, baseURL: trimmedURL, type: type)
+    }
+
+    private var validationMessage: String? {
+        if trimmedName.isEmpty || trimmedURL.isEmpty { return nil }
+        if !candidate.hasValidURL {
+            return "URL must be a valid https:// address with a host"
+        }
+        if manager.providers.contains(where: { $0.baseURL == candidate.baseURL }) {
+            return "A service with this URL is already being monitored"
+        }
+        return nil
+    }
+
+    private var canSubmit: Bool {
+        !trimmedName.isEmpty && !trimmedURL.isEmpty && validationMessage == nil
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             Text("Add Custom Service")
@@ -231,17 +274,26 @@ struct AddCustomServiceView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            if let message = validationMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(message)
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
                 Button("Add") {
-                    let provider = Provider(name: name, baseURL: url, type: type)
-                    manager.addProvider(provider)
-                    logger.info("Added custom provider: \(name)")
+                    manager.addProvider(candidate)
+                    logger.info("Added custom provider: \(trimmedName)")
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(name.isEmpty || url.isEmpty)
+                .disabled(!canSubmit)
             }
         }
         .padding(20)
@@ -476,38 +528,6 @@ struct CatalogSettingsView: View {
     }
 }
 
-// MARK: - Category Chip
-
-struct CategoryChip: View {
-    let label: String
-    let count: Int
-    let isSelected: Bool
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Text(label)
-                    .font(.caption)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                Text("\(count)")
-                    .font(.caption2)
-                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(isSelected ? Color.accentColor : isHovered ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : Color(nsColor: .controlBackgroundColor))
-            )
-            .foregroundStyle(isSelected ? .white : .primary)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-    }
-}
-
 // MARK: - Preferences Tab
 
 struct PreferencesSettingsView: View {
@@ -543,7 +563,9 @@ struct PreferencesSettingsView: View {
                             Text("Notifications are disabled in System Settings")
                                 .font(.caption)
                             Button("Open Notification Settings") {
-                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings")!)
+                                if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings") {
+                                    NSWorkspace.shared.open(url)
+                                }
                             }
                             .font(.caption)
                         }

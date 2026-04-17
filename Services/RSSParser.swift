@@ -7,6 +7,17 @@ struct RSSItem {
     var pubDate: Date?
 }
 
+enum RSSParseError: Error, LocalizedError {
+    case malformed(underlying: Error?)
+
+    var errorDescription: String? {
+        switch self {
+        case .malformed(let underlying):
+            return underlying?.localizedDescription ?? "Malformed RSS/Atom feed"
+        }
+    }
+}
+
 class RSSStatusParser: NSObject, XMLParserDelegate {
     private let data: Data
     private var items: [RSSItem] = []
@@ -17,8 +28,9 @@ class RSSStatusParser: NSObject, XMLParserDelegate {
 
     private static let dateFormatters: [DateFormatter] = {
         let formats = [
-            "EEE, dd MMM yyyy HH:mm:ss Z",    // RFC 822
-            "yyyy-MM-dd'T'HH:mm:ssZ",          // ISO 8601
+            "EEE, dd MMM yyyy HH:mm:ss Z",      // RFC 822, numeric offset (+0000)
+            "EEE, dd MMM yyyy HH:mm:ss zzz",    // RFC 822, named zone (PST, UTC) — AWS style
+            "yyyy-MM-dd'T'HH:mm:ssZ",           // ISO 8601
             "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
         ]
         return formats.map { fmt in
@@ -33,11 +45,13 @@ class RSSStatusParser: NSObject, XMLParserDelegate {
         self.data = data
     }
 
-    func parse() -> [RSSItem] {
+    func parse() throws -> [RSSItem] {
         let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false
         parser.delegate = self
-        parser.parse()
+        guard parser.parse() else {
+            throw RSSParseError.malformed(underlying: parser.parserError)
+        }
         return items
     }
 
@@ -57,6 +71,14 @@ class RSSStatusParser: NSObject, XMLParserDelegate {
         currentText += string
     }
 
+    /// Status-page RSS feeds typically wrap descriptions in CDATA (they contain
+    /// HTML). `XMLParser` delivers those here, NOT via `foundCharacters`.
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        if let text = String(data: CDATABlock, encoding: .utf8) {
+            currentText += text
+        }
+    }
+
     func parser(_ parser: XMLParser, didEndElement elementName: String,
                 namespaceURI: String?, qualifiedName qName: String?) {
         let el = elementName.lowercased()
@@ -68,7 +90,12 @@ class RSSStatusParser: NSObject, XMLParserDelegate {
             case "description", "summary", "content": currentItem?.description = text
             case "guid", "id": currentItem?.guid = text
             case "pubdate", "published", "updated":
-                currentItem?.pubDate = Self.dateFormatters.compactMap { $0.date(from: text) }.first
+                for df in Self.dateFormatters {
+                    if let date = df.date(from: text) {
+                        currentItem?.pubDate = date
+                        break
+                    }
+                }
             default: break
             }
         }

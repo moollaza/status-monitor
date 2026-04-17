@@ -29,5 +29,12 @@ Package.resolved
 # Release artifacts
 releases/
 
+# Secrets (in case anyone ever uses .env for API keys/passwords)
+.env
+.env.local
+
+# Agent working docs (audits, scratch, etc.)
+agent-docs/
+
 # Website build artifacts (catalog.json is copied from Resources/ at deploy time)
 website/catalog.json

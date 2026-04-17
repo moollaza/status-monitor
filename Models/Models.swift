@@ -1,5 +1,8 @@
 import Foundation
 import AppKit
+import OSLog
+
+private let catalogLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "StatusMonitor", category: "catalog")
 
 // MARK: - Catalog Entry (read-only reference data)
 
@@ -27,17 +30,24 @@ struct Catalog {
     let categoryCounts: [(String, Int)]
 
     static let shared: Catalog = {
+        // catalog.json ships in the app bundle and is generated + validated
+        // by `scripts/audit-catalog.py`. A missing or malformed file is a
+        // build regression, not a runtime condition — fail loud in DEBUG so
+        // the problem surfaces immediately, and gracefully fall back to an
+        // empty catalog in release so the app still launches.
         guard let url = Bundle.main.url(forResource: "catalog", withExtension: "json"),
-              let data = try? Data(contentsOf: url) else {
+              let data = try? Data(contentsOf: url),
+              let entries = try? JSONDecoder().decode([CatalogEntry].self, from: data) else {
+            catalogLogger.error("Failed to load catalog.json — shipping a broken bundle?")
+            assertionFailure("catalog.json missing or malformed — check scripts/audit-catalog.py")
             return Catalog(entries: [], categories: [], categoryCounts: [])
         }
-        let decoder = JSONDecoder()
-        let decoded = (try? decoder.decode([CatalogEntry].self, from: data)) ?? []
-        let sorted = decoded.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let sorted = entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         let categories = Array(Set(sorted.map(\.category))).sorted()
         var countsByCategory: [String: Int] = [:]
         for entry in sorted { countsByCategory[entry.category, default: 0] += 1 }
         let categoryCounts = categories.map { ($0, countsByCategory[$0] ?? 0) }.sorted { $0.1 > $1.1 }
+        catalogLogger.info("Loaded \(sorted.count) catalog entries")
         return Catalog(entries: sorted, categories: categories, categoryCounts: categoryCounts)
     }()
 
@@ -158,13 +168,16 @@ struct Provider: Identifiable, Codable, Equatable {
     var hasValidURL: Bool {
         guard let url = URL(string: baseURL),
               let scheme = url.scheme?.lowercased(),
-              ["https", "http"].contains(scheme) else {
+              scheme == "https",
+              let host = url.host,
+              !host.isEmpty else {
             return false
         }
         return true
     }
 
     var apiURL: URL? {
+        guard hasValidURL else { return nil }
         switch type {
         case .statuspage:
             return URL(string: "\(baseURL)/api/v2/summary.json")
@@ -173,7 +186,13 @@ struct Provider: Identifiable, Codable, Equatable {
         }
     }
 
-    static let defaults: [Provider] = []
+    /// URL suitable for opening in the user's browser (NSWorkspace.open). Nil
+    /// when the baseURL is not a valid https URL — prevents `file://`,
+    /// `javascript:`, `x-apple.*` and other schemes from reaching NSWorkspace.
+    var externalURL: URL? {
+        guard hasValidURL, let url = URL(string: baseURL) else { return nil }
+        return url
+    }
 }
 
 enum ProviderType: String, Codable, CaseIterable {
@@ -260,8 +279,8 @@ struct StatuspageIncident: Codable, Identifiable {
 struct StatuspageIncidentUpdate: Codable, Identifiable {
     let id: String
     let status: String
-    let body: String
-    let createdAt: String
+    let body: String?        // optional — incident.io variants sometimes omit body
+    let createdAt: String?   // optional — some responses omit created_at on silently-created updates
 
     enum CodingKeys: String, CodingKey {
         case id, status, body
@@ -282,11 +301,11 @@ enum ComponentStatus: String, Codable, Comparable {
     var severity: Int {
         switch self {
         case .operational: return 0
-        case .degradedPerformance: return 1
-        case .underMaintenance: return 1
-        case .partialOutage: return 2
-        case .majorOutage: return 3
-        case .unknown: return -1
+        case .unknown: return 1            // elevated so unrecognised/errored state surfaces instead of masquerading as healthy
+        case .degradedPerformance: return 2
+        case .underMaintenance: return 2
+        case .partialOutage: return 3
+        case .majorOutage: return 4
         }
     }
 

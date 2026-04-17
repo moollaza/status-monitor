@@ -58,13 +58,24 @@ final class ComponentStatusTests: XCTestCase {
     // MARK: - Severity ordering
 
     func testSeverityOrdering() {
-        XCTAssertLessThan(ComponentStatus.operational.severity, ComponentStatus.degradedPerformance.severity)
+        // operational < unknown < degraded == maintenance < partial < major
+        XCTAssertLessThan(ComponentStatus.operational.severity, ComponentStatus.unknown.severity)
+        XCTAssertLessThan(ComponentStatus.unknown.severity, ComponentStatus.degradedPerformance.severity)
         XCTAssertLessThan(ComponentStatus.degradedPerformance.severity, ComponentStatus.partialOutage.severity)
         XCTAssertLessThan(ComponentStatus.partialOutage.severity, ComponentStatus.majorOutage.severity)
     }
 
-    func testUnknownSeverityIsNegative() {
-        XCTAssertEqual(ComponentStatus.unknown.severity, -1)
+    func testUnknownSeverityElevatesAboveOperational() {
+        // Unknown means "we couldn't confirm this service is healthy" — it
+        // must elevate worst-status above operational so the user is warned.
+        XCTAssertGreaterThan(ComponentStatus.unknown.severity, ComponentStatus.operational.severity,
+                             ".unknown must surface above .operational to prevent silent green when monitoring is degraded")
+    }
+
+    func testRealDegradedBeatsUnknown() {
+        // An actual degraded signal should override an unknown — we don't want
+        // the "we couldn't parse" state to drown a real incident.
+        XCTAssertLessThan(ComponentStatus.unknown.severity, ComponentStatus.degradedPerformance.severity)
     }
 
     func testMaintenanceSeverityEqualsDegraded() {
@@ -79,20 +90,32 @@ final class ComponentStatusTests: XCTestCase {
     }
 
     func testComparableSorted() {
-        let statuses: [ComponentStatus] = [.majorOutage, .operational, .partialOutage, .degradedPerformance]
+        let statuses: [ComponentStatus] = [.majorOutage, .operational, .partialOutage, .degradedPerformance, .unknown]
         let sorted = statuses.sorted()
-        XCTAssertEqual(sorted, [.operational, .degradedPerformance, .partialOutage, .majorOutage])
+        XCTAssertEqual(sorted, [.operational, .unknown, .degradedPerformance, .partialOutage, .majorOutage])
     }
 
-    func testMaxWithUnknown() {
-        // .unknown has severity -1, so .operational (severity 0) should win
+    func testMaxWithUnknownSurfacesUnknown() {
+        // .unknown surfaces above .operational so the menu bar doesn't lie.
         let statuses: [ComponentStatus] = [.unknown, .operational]
-        XCTAssertEqual(statuses.max(), .operational)
+        XCTAssertEqual(statuses.max(), .unknown)
+    }
+
+    func testMaxUnknownLosesToRealDegraded() {
+        let statuses: [ComponentStatus] = [.unknown, .degradedPerformance]
+        XCTAssertEqual(statuses.max(), .degradedPerformance,
+                       "A real degraded signal must override an unknown one")
     }
 
     func testMaxAllUnknown() {
         let statuses: [ComponentStatus] = [.unknown, .unknown]
         XCTAssertEqual(statuses.max(), .unknown)
+    }
+
+    // MARK: - fromIndicator coverage
+
+    func testFromIndicatorMaintenance() {
+        XCTAssertEqual(ComponentStatus(fromIndicator: "maintenance"), .underMaintenance)
     }
 
     // MARK: - Labels

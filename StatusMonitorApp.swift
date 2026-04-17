@@ -69,8 +69,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("App launching")
 
+        // Launch arguments for UI tests. A menu-bar app is hard to drive via
+        // XCUITest because the status item lives in a separate process; these
+        // hooks let tests land directly on an inspectable window.
+        let args = ProcessInfo.processInfo.arguments
+        let uiTestMode = args.contains("-UITestMode")
+        if uiTestMode {
+            // Start clean each run so onboarding / provider state doesn't leak
+            // across tests.
+            UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier ?? "com.moollapps.StatusMonitor")
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        }
+
         UserDefaults.standard.register(defaults: ["notificationsEnabled": true])
-        NSApp.setActivationPolicy(.accessory)
+        // Menu-bar apps use .accessory in production (no Dock icon, no foreground
+        // state). That isolation prevents XCUITest from enumerating windows, so
+        // we promote to .regular during UI tests — the status item still shows,
+        // but the app becomes a regular foreground process the test harness
+        // can drive.
+        NSApp.setActivationPolicy(uiTestMode ? .regular : .accessory)
 
         UNUserNotificationCenter.current().delegate = NotificationService.shared
         NotificationService.shared.requestPermission()
@@ -131,7 +148,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if let providerId {
                 NotificationCenter.default.post(
-                    name: .init("DeepLinkToProvider"),
+                    name: .deepLinkToProvider,
                     object: nil,
                     userInfo: ["providerId": providerId]
                 )
@@ -158,7 +175,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         #if DEBUG
-        NotificationCenter.default.addObserver(forName: .init("SimulateStatus"), object: nil, queue: .main) { [weak self] notification in
+        NotificationCenter.default.addObserver(forName: .simulateStatus, object: nil, queue: .main) { [weak self] notification in
             guard let id = notification.userInfo?["id"] as? UUID,
                   let status = notification.userInfo?["status"] as? ComponentStatus,
                   let self = self else { return }
@@ -193,6 +210,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         logger.info("App launch complete — \(self.statusManager.providers.count) providers")
+
+        // UI tests: auto-open the window they need so we don't have to drive
+        // the status bar item via Accessibility APIs (which don't work in CI).
+        if args.contains("-UITestOpenSettings") {
+            DispatchQueue.main.async { [weak self] in self?.openSettings() }
+        }
+        if args.contains("-UITestOpenSettingsAt") {
+            if let idx = args.firstIndex(of: "-UITestOpenSettingsAt"),
+               idx + 1 < args.count,
+               let tab = SettingsTab(rawValue: args[idx + 1]) {
+                DispatchQueue.main.async { [weak self] in self?.openSettings(tab: tab) }
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -208,13 +238,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings Window
 
-    func openSettings() {
-        if let window = settingsWindow, window.isVisible {
+    func openSettings(tab: SettingsTab = .services) {
+        // Reuse the existing window regardless of visibility so tab selection
+        // and other state persist across close/reopen. With
+        // `isReleasedWhenClosed = false` the window lives as long as
+        // settingsWindow retains it.
+        if let window = settingsWindow {
+            SettingsInitialTab.value = tab
+            NotificationCenter.default.post(name: .settingsTabRequested, object: nil, userInfo: ["tab": tab])
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
+        SettingsInitialTab.value = tab
         let settingsView = SettingsView()
             .environment(statusManager)
 
@@ -342,8 +379,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openFeedbackAction() {
-        openSettings()
-        // TODO: Navigate to Feedback tab
+        openSettings(tab: .feedback)
     }
 
     @objc private func quitApp() {

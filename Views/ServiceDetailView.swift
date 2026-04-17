@@ -64,7 +64,7 @@ struct ServiceDetailView: View {
 
                     Spacer()
 
-                    if let url = statusPageURL {
+                    if let url = statusPageURL, url.scheme?.lowercased() == "https" {
                         Button {
                             NSWorkspace.shared.open(url)
                         } label: {
@@ -105,9 +105,11 @@ struct ServiceDetailView: View {
                     }
                 }
 
-                Text("Updated \(snapshot.lastUpdated, style: .relative) ago")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text("Updated \(coarseTimeAgo(snapshot.lastUpdated, now: context.date))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
