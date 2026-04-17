@@ -19,7 +19,7 @@ protocol NotificationServicing: AnyObject {
 }
 
 class NotificationService: NSObject, UNUserNotificationCenterDelegate, NotificationServicing {
-    static let shared = NotificationService()
+    nonisolated(unsafe) static let shared = NotificationService()
 
     /// Called when user taps a notification with the provider ID for deep-linking.
     var onNotificationTapped: (@MainActor @Sendable (_ providerId: UUID?) -> Void)?
@@ -29,15 +29,26 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
     /// requests that the system will silently drop.
     private var authorizationStatus: UNAuthorizationStatus = .notDetermined
 
-    private override init() {
+    /// The init is nonisolated so the `shared` static can initialize without
+    /// needing the main actor. Main-actor setup (delegate wiring, initial
+    /// permission refresh) happens in `setup()`, which AppDelegate calls
+    /// during `applicationDidFinishLaunching` — already on main.
+    nonisolated private override init() {
         super.init()
+    }
+
+    func setup() {
         UNUserNotificationCenter.current().delegate = self
         refreshAuthorizationStatus()
     }
 
     func refreshAuthorizationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
-            self?.authorizationStatus = settings.authorizationStatus
+            // Callback fires on a UN-internal queue — hop back to main before
+            // touching mutable state.
+            Task { @MainActor in
+                self?.authorizationStatus = settings.authorizationStatus
+            }
         }
     }
 
@@ -49,7 +60,7 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
             if !granted {
                 logger.warning("User denied notification permission — outage alerts will not be delivered")
             }
-            self?.refreshAuthorizationStatus()
+            Task { @MainActor in self?.refreshAuthorizationStatus() }
         }
     }
 
