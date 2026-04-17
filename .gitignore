@@ -35,3 +35,6 @@ releases/
 
 # Agent working docs (audits, scratch, etc.)
 agent-docs/
+
+# Website build artifacts (catalog.json is copied from Resources/ at deploy time)
+website/catalog.json
