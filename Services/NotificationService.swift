@@ -19,7 +19,7 @@ protocol NotificationServicing: AnyObject {
 }
 
 class NotificationService: NSObject, UNUserNotificationCenterDelegate, NotificationServicing {
-    nonisolated(unsafe) static let shared = NotificationService()
+    static let shared = NotificationService()
 
     /// Called when user taps a notification with the provider ID for deep-linking.
     var onNotificationTapped: (@MainActor @Sendable (_ providerId: UUID?) -> Void)?

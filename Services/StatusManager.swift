@@ -469,7 +469,7 @@ class StatusManager {
 
     // MARK: - RSS Parsing (basic)
 
-    static func rssStatusHeuristic(title: String, description: String) -> ComponentStatus {
+    nonisolated static func rssStatusHeuristic(title: String, description: String) -> ComponentStatus {
         let text = (title + " " + description).lowercased()
         // Resolved-first: "Resolved: Major outage" describes a healed incident, not an active one.
         if text.contains("resolved") || text.contains("completed") || text.contains("closed") {
