@@ -111,7 +111,7 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
     /// - With incident: "Operational → Degraded — <incident>"
     /// - Flapping: "Operational → Degraded (3rd change in the last hour)"
     /// - Both: "Operational → Degraded — <incident> (3rd change in the last hour)"
-    static func makeRequest(
+    nonisolated static func makeRequest(
         providerId: UUID,
         provider: String,
         from: ComponentStatus,
@@ -143,7 +143,7 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
         )
     }
 
-    static func makeBody(from: ComponentStatus, to: ComponentStatus, incident: String?, recentChangeCount: Int) -> String {
+    nonisolated static func makeBody(from: ComponentStatus, to: ComponentStatus, incident: String?, recentChangeCount: Int) -> String {
         var body = "\(from.label) → \(to.label)"
         if let incident {
             // Leave ~60 chars for the arrow + labels + flap suffix.
@@ -156,7 +156,7 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate, Notificat
         return body
     }
 
-    private static func ordinal(_ n: Int) -> String {
+    nonisolated private static func ordinal(_ n: Int) -> String {
         switch n {
         case 1: return "1st"
         case 2: return "2nd"
