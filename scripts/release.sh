@@ -36,11 +36,26 @@ fi
 # Ensure we're at the repo root.
 cd "$(dirname "$0")/.."
 
-# Pull version from project.pbxproj so the DMG is named correctly.
-VERSION=$(grep 'MARKETING_VERSION' "$PROJECT/project.pbxproj" | head -1 | awk -F'= ' '{print $2}' | tr -d '";')
+# Prefer the latest git tag (set by release-please when a Release PR merges)
+# as the source of truth for the version — that way the DMG name tracks the
+# published GitHub release automatically. Fall back to pbxproj's
+# MARKETING_VERSION if there are no tags yet (first-ever release).
+TAG_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+PBX_VERSION=$(grep 'MARKETING_VERSION' "$PROJECT/project.pbxproj" | head -1 | awk -F'= ' '{print $2}' | tr -d '";')
+VERSION="${TAG_VERSION:-$PBX_VERSION}"
 BUILD=$(grep 'CURRENT_PROJECT_VERSION' "$PROJECT/project.pbxproj" | head -1 | awk -F'= ' '{print $2}' | tr -d '";')
 DMG_NAME="StatusMonitor-${VERSION}.dmg"
 DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
+
+# Warn if pbxproj is stale relative to the tag — a common failure mode when
+# running release.sh against a non-release commit. Archive still proceeds so
+# the DMG is named correctly, but the embedded CFBundleShortVersionString
+# comes from pbxproj (fix by bumping locally or re-running on the tag commit).
+if [[ -n "$TAG_VERSION" && "$TAG_VERSION" != "$PBX_VERSION" ]]; then
+    echo "⚠ Version drift: git tag=v$TAG_VERSION, pbxproj=$PBX_VERSION"
+    echo "  Building with DMG name from tag; app bundle version will read $PBX_VERSION."
+    echo "  Run this from a release tag commit (\`git checkout v$TAG_VERSION\`) for a matched build."
+fi
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  StatusMonitor release: v$VERSION (build $BUILD)"
