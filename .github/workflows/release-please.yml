@@ -1,0 +1,41 @@
+name: Release Please
+
+# Security note: every action-output used in a run: step (TAG, REPO) is
+# passed via env: and referenced as "$TAG" / "$REPO" rather than interpolated
+# directly. No untrusted user input (PR titles, commit messages, issue bodies)
+# reaches any run: step. Safe per
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write       # create tags/releases and commit CHANGELOG
+  pull-requests: write  # open/update the release PR
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+
+      # Leave a breadcrumb on the release summary so a maintainer knows the
+      # DMG still needs to be uploaded. release-please can't build/notarize
+      # the app here (needs the Developer ID cert + Keychain profile), so
+      # DMG upload remains a local step.
+      - name: Note next-steps when a release is cut
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "::notice::Release $TAG created (empty). Build the notarized DMG locally with:"
+          echo "::notice::  git checkout $TAG"
+          echo "::notice::  scripts/release.sh"
+          echo "::notice::  gh release upload $TAG build/release/StatusMonitor-\${TAG#v}.dmg --repo $REPO"
