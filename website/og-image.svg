@@ -4,6 +4,16 @@
       <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.08"/>
       <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="nazarTile" x1="170" y1="112" x2="854" y2="926" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#071A5F"/>
+      <stop offset="0.54" stop-color="#0C2F9D"/>
+      <stop offset="1" stop-color="#1239B2"/>
+    </linearGradient>
+    <radialGradient id="nazarDisc" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(404 318) rotate(48) scale(510)">
+      <stop offset="0" stop-color="#0D3EE0"/>
+      <stop offset="0.56" stop-color="#0B37C6"/>
+      <stop offset="1" stop-color="#082A8A"/>
+    </radialGradient>
   </defs>
 
   <!-- Background -->
@@ -11,24 +21,19 @@
   <rect width="1200" height="630" fill="url(#g)"/>
 
   <!-- App icon tile -->
-  <g transform="translate(96 160)">
-    <rect width="160" height="160" rx="36" ry="36" fill="#16a34a"/>
-    <g fill="#ffffff" transform="translate(80 80) scale(0.28)">
-      <circle cx="0" cy="-104" r="34"/>
-      <rect x="-18" y="-80" width="36" height="220" rx="14"/>
-    </g>
-    <g fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" transform="translate(80 80) scale(0.28)">
-      <path d="M-78 -140 q-40 40 0 100"/>
-      <path d="M78 -140 q40 40 0 100"/>
-      <path d="M-140 -166 q-56 64 0 152"/>
-      <path d="M140 -166 q56 64 0 152"/>
-    </g>
+  <g transform="translate(96 160) scale(0.15625)">
+    <rect x="56" y="56" width="912" height="912" rx="220" fill="url(#nazarTile)"/>
+    <circle cx="512" cy="512" r="344" fill="url(#nazarDisc)"/>
+    <circle cx="512" cy="512" r="242" fill="#F8FAFC"/>
+    <circle cx="512" cy="512" r="158" fill="#38BDF8"/>
+    <circle cx="512" cy="512" r="84" fill="#0F172A"/>
+    <circle cx="400" cy="286" r="36" fill="#FFFFFF" opacity="0.78"/>
   </g>
 
   <!-- Wordmark + tagline -->
   <text x="288" y="212" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif" font-size="38" font-weight="500" fill="#4a4a52" letter-spacing="0.5">Nazar</text>
-  <text x="288" y="300" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif" font-size="70" font-weight="700" fill="#111113" letter-spacing="-1.5">Watches the services</text>
-  <text x="288" y="376" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif" font-size="70" font-weight="700" fill="#111113" letter-spacing="-1.5">you depend on.</text>
+  <text x="288" y="300" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif" font-size="70" font-weight="700" fill="#111113" letter-spacing="0">Watches the services</text>
+  <text x="288" y="376" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif" font-size="70" font-weight="700" fill="#111113" letter-spacing="0">you depend on.</text>
 
   <!-- Feature row -->
   <g transform="translate(96 478)" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif" font-size="24" fill="#4a4a52">
