@@ -19,8 +19,6 @@ on:
       - "package.json"
       - "package-lock.json"
       - "playwright.config.js"
-  workflow_dispatch:
-
 permissions:
   contents: read
 
