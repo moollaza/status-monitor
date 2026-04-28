@@ -14,7 +14,7 @@ test.describe('Nazar website', () => {
     await page.goto('/');
 
     await expect(page.getByRole('heading', { name: 'Nazar watches the services you depend on.' })).toBeVisible();
-    await expect(page.getByText('No account. No telemetry. Polls public status pages directly from your Mac.')).toBeVisible();
+    await expect(page.getByText('No account. No app telemetry. Polls public status pages directly from your Mac.')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Find the services you rely on' })).toBeVisible();
     await expect(page.getByText('Failed to load catalog')).toHaveCount(0);
     await expect(page.locator('#catalog-list a').first()).toBeVisible();
