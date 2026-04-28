@@ -159,13 +159,6 @@
           <!-- Dashboard mock — mirrors Views/DashboardView.swift (420×520 panel). Keep in sync when UI changes. -->
           <div class="flex items-center justify-center">
             <div class="relative w-full max-w-[440px]">
-              <!-- Menu bar chrome hint -->
-              <div class="mx-auto mb-3 flex w-fit items-center gap-2 rounded-md border border-border-subtle bg-surface-raised/80 px-3 py-1.5 text-xs text-text-tertiary" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M7 16a5 5 0 0 1 10 0"/><path d="M10 16a2 2 0 0 1 4 0"/><circle cx="12" cy="16" r="1" fill="currentColor" stroke="none"/></svg>
-                <span class="font-medium text-text-secondary">in your menu bar</span>
-                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 4l4 4 4-4z"/></svg>
-              </div>
-
               <div role="img" aria-label="Nazar dashboard showing nine services with operational, degraded, and outage statuses." class="overflow-hidden rounded-2xl border border-border-subtle bg-surface-raised shadow-[0_24px_64px_-12px_rgba(17,17,19,0.18)] dark:shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)]">
                 <!-- Dashboard header -->
                 <div class="flex items-center gap-2 px-4 py-2.5">
@@ -175,12 +168,16 @@
                     <span class="inline-flex h-6 w-6 items-center justify-center rounded-md">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L1 21h22L12 2z"/><path d="M12 9v4M12 17h.01"/></svg>
                     </span>
-                    <!-- Sort segmented control: ↑↓ (active) / Abc -->
+                    <!-- Sort segmented control: severity (active) / alphabetical -->
                     <span class="inline-flex items-center overflow-hidden rounded-md border border-border-subtle text-[10px] font-semibold">
                       <span class="inline-flex h-6 w-8 items-center justify-center bg-[#dcdcff] text-[#4338ca] dark:bg-[#2d2d52] dark:text-[#a5b4fc]">
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M7 4l-3 3M7 4l3 3M17 20V4M17 20l-3-3M17 20l3-3"/></svg>
                       </span>
-                      <span class="inline-flex h-6 w-8 items-center justify-center text-text-tertiary">Abc</span>
+                      <span class="inline-flex h-6 w-8 items-center justify-center text-text-tertiary" aria-label="Alphabetical sort">
+                        <svg width="17" height="12" viewBox="0 0 34 24" fill="currentColor" aria-hidden="true">
+                          <text x="1" y="18" font-size="17" font-weight="700" letter-spacing="0">abc</text>
+                        </svg>
+                      </span>
                     </span>
                     <!-- Refresh -->
                     <span class="inline-flex h-6 w-6 items-center justify-center rounded-md">

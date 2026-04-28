@@ -146,108 +146,83 @@ function pill(text, bg, color, width) {
   );
 }
 
-function magnifyingGlass(size, color) {
-  const ring = size * 0.48;
+function svgIcon(size, color, children, extra = {}) {
   return h(
-    'div',
+    'svg',
     {
+      width: size,
+      height: size,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: color,
+      strokeWidth: 2.2,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
       style: {
-        position: 'relative',
         width: size,
         height: size,
         display: 'flex',
         flexShrink: 0,
+        ...extra,
       },
     },
-    h('div', {
-      style: {
-        position: 'absolute',
-        left: size * 0.13,
-        top: size * 0.12,
-        width: ring,
-        height: ring,
-        borderRadius: ring,
-        border: `${Math.max(2, size * 0.09)}px solid ${color}`,
-      },
-    }),
-    h('div', {
-      style: {
-        position: 'absolute',
-        right: size * 0.16,
-        bottom: size * 0.18,
-        width: size * 0.34,
-        height: Math.max(2, size * 0.09),
-        borderRadius: 99,
-        backgroundColor: color,
-        transform: 'rotate(45deg)',
-      },
-    })
+    children
   );
 }
 
-function refreshIcon(size, color) {
+function issueIcon(size, color) {
+  return svgIcon(size, color, [
+    h('path', { d: 'M12 3 2.8 20h18.4L12 3z' }),
+    h('path', { d: 'M12 9v5' }),
+    h('path', { d: 'M12 17h.01' }),
+  ]);
+}
+
+function sortIcon(size, color) {
+  return svgIcon(size, color, [
+    h('path', { d: 'M8 5v14' }),
+    h('path', { d: 'M5 8l3-3 3 3' }),
+    h('path', { d: 'M16 19V5' }),
+    h('path', { d: 'M13 16l3 3 3-3' }),
+  ]);
+}
+
+function abcIcon(size, color) {
   return h(
     'div',
     {
       style: {
-        position: 'relative',
-        width: size,
+        width: size + 4,
         height: size,
-        display: 'flex',
-        flexShrink: 0,
-      },
-    },
-    h('div', {
-      style: {
-        position: 'absolute',
-        left: size * 0.18,
-        top: size * 0.18,
-        width: size * 0.58,
-        height: size * 0.58,
-        borderRadius: size,
-        border: `${Math.max(2, size * 0.09)}px solid ${color}`,
-        borderLeftColor: 'transparent',
-      },
-    }),
-    h('div', {
-      style: {
-        position: 'absolute',
-        right: size * 0.08,
-        top: size * 0.17,
-        width: 0,
-        height: 0,
-        borderTop: `${size * 0.16}px solid transparent`,
-        borderBottom: `${size * 0.16}px solid transparent`,
-        borderLeft: `${size * 0.22}px solid ${color}`,
-      },
-    })
-  );
-}
-
-function gearIcon(size, color) {
-  return h(
-    'div',
-    {
-      style: {
-        width: size,
-        height: size,
-        borderRadius: size,
-        border: `${Math.max(2, size * 0.12)}px solid ${color}`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
+        color,
+        fontSize: size * 0.72,
+        lineHeight: 1,
+        fontWeight: 760,
       },
     },
-    h('div', {
-      style: {
-        width: size * 0.28,
-        height: size * 0.28,
-        borderRadius: size,
-        backgroundColor: color,
-      },
-    })
+    'abc'
   );
+}
+
+function magnifyingGlass(size, color) {
+  return svgIcon(size, color, [h('circle', { cx: 11, cy: 11, r: 7 }), h('path', { d: 'm21 21-4.3-4.3' })]);
+}
+
+function refreshIcon(size, color) {
+  return svgIcon(size, color, [h('path', { d: 'M21 12a9 9 0 1 1-2.6-6.4' }), h('path', { d: 'M21 4v5h-5' })]);
+}
+
+function gearIcon(size, color) {
+  return svgIcon(size, color, [
+    h('circle', { cx: 12, cy: 12, r: 3 }),
+    h('path', {
+      d: 'M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+    }),
+  ]);
 }
 
 function row({ label, avatarText, avatarBg, avatarColor, dot, status, statusTone, muted }) {
@@ -273,7 +248,7 @@ function row({ label, avatarText, avatarBg, avatarColor, dot, status, statusTone
     'div',
     {
       style: {
-        height: 51,
+        height: 48,
         padding: '0 22px',
         display: 'flex',
         alignItems: 'center',
@@ -399,9 +374,9 @@ function productShot() {
       style: {
         position: 'absolute',
         right: 72,
-        top: 104,
+        top: 112,
         width: 448,
-        height: 486,
+        height: 468,
         borderRadius: 28,
         backgroundColor: '#FFFFFF',
         border: '1px solid #E2E8F0',
@@ -415,7 +390,7 @@ function productShot() {
       'div',
       {
         style: {
-          height: 74,
+          height: 66,
           padding: '0 26px',
           display: 'flex',
           alignItems: 'center',
@@ -446,38 +421,48 @@ function productShot() {
             fontSize: 18,
           },
         },
+        issueIcon(22, '#64748B'),
         h(
           'div',
           {
             style: {
-              width: 46,
-              height: 32,
-              borderRadius: 9,
-              backgroundColor: '#DCDCFD',
-              color: '#4338CA',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-            },
-          },
-          'Sort'
-        ),
-        h(
-          'div',
-          {
-            style: {
-              width: 50,
+              width: 74,
               height: 32,
               borderRadius: 9,
               border: '1px solid #E2E8F0',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 650,
+              overflow: 'hidden',
             },
           },
-          'Abc'
+          h(
+            'div',
+            {
+              style: {
+                width: 36,
+                height: 32,
+                backgroundColor: '#DCDCFD',
+                color: '#4338CA',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+            },
+            sortIcon(17, '#4338CA')
+          ),
+          h(
+            'div',
+            {
+              style: {
+                width: 37,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+            },
+            abcIcon(17, '#64748B')
+          )
         ),
         refreshIcon(23, '#64748B'),
         gearIcon(22, '#64748B')
@@ -487,8 +472,8 @@ function productShot() {
       'div',
       {
         style: {
-          height: 74,
-          padding: '18px 26px 14px',
+          height: 64,
+          padding: '13px 26px 11px',
           borderBottom: '1px solid #E2E8F0',
           flexShrink: 0,
         },
@@ -497,7 +482,7 @@ function productShot() {
         'div',
         {
           style: {
-            height: 42,
+            height: 40,
             borderRadius: 12,
             backgroundColor: '#F8FAFC',
             color: '#64748B',
@@ -508,7 +493,7 @@ function productShot() {
             fontSize: 20,
           },
         },
-        magnifyingGlass(22, '#94A3B8'),
+        magnifyingGlass(20, '#94A3B8'),
         'Filter services...'
       )
     ),
@@ -527,7 +512,7 @@ function productShot() {
       'div',
       {
         style: {
-          height: 54,
+          height: 50,
           padding: '0 26px',
           borderTop: '1px solid #E2E8F0',
           backgroundColor: '#F8FAFC',
@@ -539,61 +524,6 @@ function productShot() {
       h('div', { style: { width: 13, height: 13, borderRadius: 13, backgroundColor: '#F97316' } }),
       h('div', { style: { marginLeft: 14, color: '#EA580C', fontSize: 20, fontWeight: 800 } }, '2 issues'),
       h('div', { style: { marginLeft: 'auto', color: '#64748B', fontSize: 18 } }, 'Updated 45 secs. ago')
-    )
-  );
-}
-
-function menuBarHint() {
-  return h(
-    'div',
-    {
-      style: {
-        position: 'absolute',
-        right: 184,
-        top: 54,
-        height: 44,
-        padding: '0 20px',
-        borderRadius: 13,
-        backgroundColor: '#FFFFFF',
-        border: '1px solid #E2E8F0',
-        color: '#475569',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 13,
-        fontSize: 20,
-        fontWeight: 680,
-      },
-    },
-    iconMark(21),
-    'in your menu bar',
-    h('div', { style: { color: '#64748B', fontSize: 18 } }, 'v')
-  );
-}
-
-function notificationCard() {
-  return h(
-    'div',
-    {
-      style: {
-        position: 'absolute',
-        right: 236,
-        bottom: 74,
-        width: 322,
-        height: 92,
-        borderRadius: 22,
-        backgroundColor: '#FFFFFF',
-        boxShadow: '0 18px 42px rgba(15, 23, 42, 0.12)',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 24px',
-      },
-    },
-    h('div', { style: { width: 13, height: 13, borderRadius: 13, backgroundColor: '#F97316', flexShrink: 0 } }),
-    h(
-      'div',
-      { style: { marginLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 } },
-      h('div', { style: { fontSize: 18, fontWeight: 780, color: '#0F172A' } }, '2 issues'),
-      h('div', { style: { fontSize: 15, fontWeight: 520, color: '#64748B' } }, 'Claude and GitHub need attention')
     )
   );
 }
@@ -672,9 +602,7 @@ function card() {
       },
       'usenazar.com'
     ),
-    menuBarHint(),
-    productShot(),
-    notificationCard()
+    productShot()
   );
 }
 
