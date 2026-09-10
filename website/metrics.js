@@ -9,7 +9,14 @@
 // "analytics": content blockers match generic URL patterns, so `posthog-init.js`
 // and `analytics.js` alike get dropped before they ever run.
 const PROJECT_TOKEN = 'phc_BSZYpDr8ti5PJYodLmmzTTM8HjF8vHf43Xhc9QnbqFHN';
-const API_HOST = 'https://us.i.posthog.com';
+// Ingestion goes through our own subdomain (a PostHog managed reverse proxy)
+// rather than us.i.posthog.com, which sits on the standard blocklists. This is
+// the layer that actually recovers otherwise-dropped events; the filename below
+// only covers the second, smaller one.
+const API_HOST = 'https://z.usenazar.com';
+// api_host is proxied, so PostHog needs the real app origin to build toolbar
+// and "view in PostHog" links.
+const UI_HOST = 'https://us.posthog.com';
 
 (function () {
   const posthog = (window.posthog = window.posthog || []);
@@ -46,6 +53,7 @@ const API_HOST = 'https://us.i.posthog.com';
 
   posthog.init(PROJECT_TOKEN, {
     api_host: API_HOST,
+    ui_host: UI_HOST,
     defaults: '2026-05-30',
     capture_exceptions: {
       capture_unhandled_errors: true,

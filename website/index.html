@@ -806,6 +806,10 @@
 
     <script>
       (function () {
+        // Fathom has no event properties, so placements must be distinct event
+        // names there. PostHog does have properties, so the placements collapse
+        // into one event with a `placement` breakdown — otherwise every funnel
+        // would have to enumerate all four download events forever.
         const posthogEventByFathomEvent = {
           'nav.download.click': 'download_clicked',
           'hero.download.click': 'download_clicked',
@@ -828,8 +832,11 @@
             }
           } catch {}
 
-          const posthogEvent = posthogEventByFathomEvent[name];
-          if (posthogEvent) window.posthog?.capture(posthogEvent, { placement: name });
+          // Fathom names are `<placement>.<object>.<action>`. Anything not in the
+          // table above still gets through under a derived name; dropping it here
+          // would mean a newly tagged element silently reports to Fathom only.
+          const posthogEvent = posthogEventByFathomEvent[name] ?? name.replace(/\./g, '_');
+          window.posthog?.capture(posthogEvent, { placement: name.split('.')[0] });
         };
 
         document.addEventListener('click', (event) => {
