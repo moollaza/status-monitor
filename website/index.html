@@ -821,9 +821,12 @@
           'services.request.click': 'service_request_opened',
           'services.status_page.click': 'service_status_page_opened',
           'faq.item.open': 'faq_answer_opened',
+          'theme.toggle.click': 'theme_changed',
+          'services.category.select': 'catalog_category_selected',
+          'services.search.start': 'catalog_search_started',
         };
 
-        window.trackNazarEvent = function (name) {
+        window.trackNazarEvent = function (name, properties) {
           if (!name) return;
           try {
             const tracker = window.fathom;
@@ -836,7 +839,7 @@
           // table above still gets through under a derived name; dropping it here
           // would mean a newly tagged element silently reports to Fathom only.
           const posthogEvent = posthogEventByFathomEvent[name] ?? name.replace(/\./g, '_');
-          window.posthog?.capture(posthogEvent, { placement: name.split('.')[0] });
+          window.posthog?.capture(posthogEvent, { placement: name.split('.')[0], ...properties });
         };
 
         document.addEventListener('click', (event) => {
@@ -885,8 +888,7 @@
           current = order[(order.indexOf(current) + 1) % order.length];
           try { localStorage.setItem('theme', current); } catch {}
           apply(current);
-          window.trackNazarEvent('theme.toggle.click');
-          window.posthog?.capture('theme_changed', { theme: current });
+          window.trackNazarEvent('theme.toggle.click', { theme: current });
         });
       })();
     </script>
@@ -1065,8 +1067,7 @@
           const btn = e.target.closest('.category-chip');
           if (btn) {
             setCategory(btn.dataset.category);
-            window.trackNazarEvent('services.category.select');
-            window.posthog?.capture('catalog_category_selected', { category: btn.dataset.category });
+            window.trackNazarEvent('services.category.select', { category: btn.dataset.category });
           }
         });
 
@@ -1080,7 +1081,6 @@
             if (!hasTrackedSearch && query.trim()) {
               hasTrackedSearch = true;
               window.trackNazarEvent('services.search.start');
-              window.posthog?.capture('catalog_search_started');
             }
           }, 100);
         });
