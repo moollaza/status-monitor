@@ -5,8 +5,9 @@
 // rather than injected at build time because this site is intentionally static
 // (no build step, so every host can serve the same assets).
 //
-// The filename deliberately avoids naming the vendor: content blockers match
-// generic URL patterns, so `posthog-init.js` gets dropped before it ever runs.
+// The filename deliberately avoids both the vendor name and the word
+// "analytics": content blockers match generic URL patterns, so `posthog-init.js`
+// and `analytics.js` alike get dropped before they ever run.
 const PROJECT_TOKEN = 'phc_BSZYpDr8ti5PJYodLmmzTTM8HjF8vHf43Xhc9QnbqFHN';
 const API_HOST = 'https://us.i.posthog.com';
 
